@@ -32,7 +32,7 @@ export NUMEXPR_NUM_THREADS=1
     --outdir %(outdir)s \
     --repo %(repo)s --collection %(collection)s \
     --gaia-file %(gaia_file)s \
-    --nproc %(nproc)d --no-images
+    --nproc %(nproc)d --no-images %(extra)s
 '''
 
 
@@ -54,6 +54,11 @@ def get_args():
     parser.add_argument('--time', default='00:20:00')
     parser.add_argument('--partition', default='milano')
     parser.add_argument('--account', default='rubin:default')
+    parser.add_argument(
+        '--extra', default='',
+        help='extra arguments passed to lsst-starsub-cell-restore, '
+             'e.g. "--good-cells FILE"',
+    )
     return parser.parse_args()
 
 
@@ -80,6 +85,7 @@ def main():
                     outdir=outdir, repo=args.repo,
                     collection=args.collection,
                     gaia_file=os.path.abspath(args.gaia_file),
+                    extra=args.extra,
                 ))
             sub.write(f'sbatch {job}\n')
     os.chmod(submit, 0o755)

@@ -44,7 +44,72 @@ def get_args():
         '--nproc', type=int, default=4,
         help='forked workers for the input loading and the cells',
     )
+    parser.add_argument(
+        '--good-cells',
+        help='lsst-mdet good-cells fits (tract, patch, cell_i, '
+             'cell_j); pixels of cells not listed are flagged '
+             'NO_DATA before the profiles are measured',
+    )
+    parser.add_argument(
+        '--min-inputs', type=int, default=0,
+        help='flag cells with fewer inputs than this NO_DATA',
+    )
     return parser.parse_args()
+
+
+def bad_cell_mask(mcoadd, count, good_cells_file, min_inputs, tract,
+                  patch):
+    """
+    bool patch-frame mask of the pixels in cells to exclude: not
+    in the good-cells list (when given) or with fewer than
+    min_inputs inputs.  cell_i is the row (y) index and cell_j
+    the column (x) index of the 150 px grid, as in
+    lsst_mdet.cli.make_good_cells; the list's cell centers are
+    checked against the grid
+    """
+    import rustfits
+    import lsst.geom
+
+    bb = mcoadd.inner_bbox
+    ny, nx = bb.getHeight(), bb.getWidth()
+    size = mcoadd.grid.cell_size.x
+    ncy, ncx = ny // size, nx // size
+    bad = np.zeros((ny, nx), dtype=bool)
+    if min_inputs > 0:
+        bad |= count < min_inputs
+
+    if good_cells_file is not None:
+        g = rustfits.read(good_cells_file)
+        w = (g['tract'] == tract) & (g['patch'] == patch)
+        rows = g[w]
+        good = np.zeros((ncy, ncx), dtype=bool)
+        good[rows['cell_i'], rows['cell_j']] = True
+        # the convention check: the listed centers must land in
+        # their cells
+        wcs = mcoadd.wcs
+        for r in rows[:20]:
+            p = wcs.skyToPixel(lsst.geom.SpherePoint(
+                float(r['ra_center']), float(r['dec_center']),
+                lsst.geom.degrees,
+            ))
+            ci = int((p.getY() - bb.getBeginY()) // size)
+            cj = int((p.getX() - bb.getBeginX()) // size)
+            if (ci, cj) != (int(r['cell_i']), int(r['cell_j'])):
+                raise RuntimeError(
+                    f'good-cells convention mismatch: row says '
+                    f'({r["cell_i"]}, {r["cell_j"]}), center maps '
+                    f'to ({ci}, {cj})'
+                )
+        cellbad = ~good
+        bad |= np.repeat(np.repeat(cellbad, size, axis=0), size, axis=1)[
+            :ny, :nx
+        ]
+        print(
+            f'    good cells: {int(good.sum())} of {ncy * ncx} listed '
+            f'for {tract} {patch}'
+        )
+    print(f'    excluded cell fraction {bad.mean():.3f}')
+    return bad
 
 
 def main():
@@ -101,6 +166,16 @@ def main():
         none=none,
         restored=none + np.nan_to_num(bcoadd),
     )
+
+    # cells that fail the cut are flagged NO_DATA so neither the
+    # census nor any annulus pixel uses them
+    if args.good_cells is not None or args.min_inputs > 0:
+        from lsst_mdet.defaults import DM_NO_DATA
+        bad = bad_cell_mask(
+            mcoadd, count, args.good_cells, args.min_inputs,
+            args.tract, args.patch,
+        )
+        mask[:, :, 0][bad] |= DM_NO_DATA
 
     # the coadd as the deep_coadd-like object the profile code
     # reads; positions in the patch frame
