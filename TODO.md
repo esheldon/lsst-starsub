@@ -33,6 +33,35 @@ Facts established:
   scatter from -2.6 to -4.8 with no seeing trend, flattest on detectors
   hosting a G < 10 star.
 
+## Step 1 status (2026-09-08)
+
+Done on the cell coadds of tract 2395 (i, 100 patches, 7374 census
+stars) with `lsst-starsub-cell-restore` and `lsst-starsub-make-slurm-cells`:
+
+- The cell is the unit: every input covers its whole cell, so the
+  background coadd is the per-cell weighted mean of the inputs'
+  stored polynomials with the cell's own input weights, no per-pixel
+  membership.  Geometry and calibration from `visit_summary`.
+- Restoring the full polynomials is useless: their per-visit sky
+  levels make the restored sky a patchwork stepping ~26 nJy at cell
+  boundaries (N ~ 44; ~100 nJy at N ~ 10).  A second-order surface is
+  removed from each polynomial first (`SMOOTH_ORDER`); what remains is
+  the star response plus the visits' higher-order sky terms, which
+  average down as 1/sqrt(N) (per-cell offset rms 0.26 nJy at N = 44,
+  within-cell 0.04 nJy).  Higher fit orders cannot help: the 6x6
+  Chebyshev scale (~700 px) is the star-bump scale.
+- Result: the `None` trough (-15 to -19 x 10^-3 coadd sigma at 300-450
+  px for G 6-13; -5 for G 14-15.2) becomes a positive, outward-falling
+  wing (+21/+12 and +9/+3) with errors at the `None` level.  The
+  `object` state reproduces the dual-state plot A.
+- Open: at survey depth (N ~ 10) the statistical separation degrades
+  (offsets ~0.5-1 nJy).  The principled route for step 4 is to forward
+  model the trough: it is the projection of the star-wing model onto
+  each input's Chebyshev fit (DM binning and masking), a linear
+  functional of the star model with no sky terms.  Validate on a
+  typical-depth tract first (2562: median 7 visits/patch, 8537 good
+  cells; 2397 at 19 as a middle point).
+
 ## Steps
 
 1. **Restore the polynomial at the coadd level.**  For a patch, take the
