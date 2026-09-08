@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lsst_starsub"
+version = "0.1.0"
+description = "bright-star wing and sky characterization on LSST visit images"
+requires-python = ">=3.11"
+
+[project.scripts]
+lsst-starsub-visit = "lsst_starsub.cli.run_visit:main"
+lsst-starsub-stack = "lsst_starsub.cli.stack:main"
+lsst-starsub-remeasure = "lsst_starsub.cli.remeasure:main"
+lsst-starsub-make-slurm = "lsst_starsub.cli.make_slurm:main"
+
+[tool.setuptools.packages.find]
+include = ["lsst_starsub*"]
+
+# ruff configuration lives in .ruff.toml

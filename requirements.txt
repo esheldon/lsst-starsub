@@ -1,0 +1,12 @@
+# core
+numpy
+scipy
+matplotlib
+sep
+rustfits
+# the coadd star-subtraction machinery (install from source,
+# ~/git/lsst-mdet: pip install -e .)
+#   lsst_mdet
+# The LSST science pipelines are required for the butler loaders
+# (lsst_starsub.visit.load_visit_exposure and the cli); the rest of
+# the package works without them
