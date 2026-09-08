@@ -54,55 +54,76 @@ stars) with `lsst-starsub-cell-restore` and `lsst-starsub-make-slurm-cells`:
   px for G 6-13; -5 for G 14-15.2) becomes a positive, outward-falling
   wing (+21/+12 and +9/+3) with errors at the `None` level.  The
   `object` state reproduces the dual-state plot A.
-- Open: at survey depth (N ~ 10) the statistical separation degrades
-  (offsets ~0.5-1 nJy).  The principled route for step 4 is to forward
-  model the trough: it is the projection of the star-wing model onto
-  each input's Chebyshev fit (DM binning and masking), a linear
-  functional of the star model with no sky terms.  Validate on a
-  typical-depth tract first (2562: median 7 visits/patch, 8537 good
-  cells; 2397 at 19 as a middle point).
+- Tract 2562, the typical-depth check (i; the 31 patches with good
+  cells, cells with >= 3 inputs via `--good-cells` and `--min-inputs`;
+  2460 profile rows, 70 stars at G < 13): same behaviour at low
+  statistics.  The bright-star `None` trough at 305 px, -26 +- 6,
+  becomes -6 +- 7 restored; errors inflated ~40 percent, not the
+  factor 3 seen before the order-2 removal.  Per cell the offsets are
+  ~1-2 nJy at N ~ 2 (0.1-0.2 coadd sigma), so it is the per-star
+  restored wing, not the stack, that suffers at low N.
+- Naming: `deep_coadd` is the dataset type, not "deep field".  Every
+  `deep_coadd` in the run was made the same way (warps from
+  `preliminary_visit_image`, no `skyCorr`), so the trough and this
+  restoration apply to every patch of DP2 as processed; only the
+  input count per cell varies.  Future reprocessings may differ;
+  build for the data as they are.
 
 ## Steps
 
-1. **Restore the polynomial at the coadd level.**  For a patch, take the
-   coadd's input list and weights (`deep_coadd_input_summary_tract`, plus
-   the per-cell input map for cell coadds), evaluate each input's stored
-   polynomial at every coadd pixel through the detector WCS, and form the
-   weighted mean.  Add it to the `None` state.  Validate with the
-   d - r_mask dual-state stack: the trough should vanish.  This decides
-   whether the clean-background coadd of option 1 exists without
-   recoadding.
+1. **Restore the polynomial at the coadd level.**  DONE (see status
+   above).  The statistical restoration stays as the deep-field method
+   and as the reference for step 2.
 
-2. **Decide the sky model for the restored coadd.**  With the polynomial
-   back, the coadd carries the true sky plus wings.  Fit a sky that stays
-   out of the wings on the deep image.  The visit-level version (256 px
-   pass with stars excluded to their template extents, then a 64 px
-   refit) is a first draft; the refit still takes wing at G 13-14
-   (`flat` state -2 to -3 x 10^-3 sigma beyond 300 px) and needs rework.
+2. **Forward-model the trough.**  The polynomial's response to a star
+   is a linear projection of the wing image onto the input's Chebyshev
+   fit, with DM's 128 px binning and the detection mask the fit saw.
+   Per input: render the census stars' wings from the template on the
+   detector, run the same background fit (`SubtractBackgroundTask`
+   config of `calibrateImage`: binSize 128, Chebyshev 6x6, weighted,
+   masked planes), take the fit surface as the star response.  Check
+   against the stored polynomials' structure around bright stars on a
+   few tract-2395 inputs, then combine per cell with the input weights
+   and compare the trough model with the `None` stack on both tracts.
+   No sky terms, no depth dependence; step 4 needs it regardless.  If
+   it disagrees, the mask the fit saw (the preliminary image's mask
+   plane is stored) is the first suspect.
 
-3. **Per-visit wing characterization, pooled over the focal plane.**  Run
-   the visit tool on all detectors of each input visit, but build one
-   template and aureole per visit from all its stars, excluding stamps
-   inside bright-star halos.
+3. **Sky model on the restored coadd.**  Simplified by the
+   structure-only restoration: the restored sky is the `None` sky,
+   smooth, so the existing wide-exclusion sky fit applies.  Rework the
+   refit that still takes wing at G 13-14 (`flat` state -2 to -3 x
+   10^-3 sigma beyond 300 px on the visits).
 
-4. **Carry the visit wing models into the coadd.**  Per cell, the star
-   model is the input-weighted mean of the per-visit models at that
-   position, with the step-1 weights.  Keeps the per-visit seeing
-   dependence of the wings without special coadds (subtraction commutes
-   with the weighted mean, except at clipped pixels and masked cores).
+4. **Per-visit wing characterization, pooled over the focal plane.**
+   One template and aureole per visit from all its detectors, stamps
+   inside bright-star halos excluded; per-detector templates (20-25
+   stamps) scatter from -2.6 to -4.8 in slope and are not usable.
 
-5. **Subtract and refit at coadd level.**  Subtract the step-4 model from
-   the restored, sky-fitted coadd, then the existing lsst-mdet
-   anchor-ring amplitude refit as the correction with the deep S/N.
-   Masking stays as it is.
+5. **Carry the visit wing models into the coadd.**  Per cell, the star
+   model is the input-weighted mean of the per-visit wing models minus
+   their step-2 polynomial responses, with the cell's input weights.
+   Keeps the per-visit seeing dependence without special coadds
+   (subtraction commutes with the weighted mean, except at clipped
+   pixels and masked cores).
 
-6. **Validate end to end.**  The dual-state stack on the final images in
-   all bands, plus the amplified injection test in lsst-mdet.
+6. **Subtract and refit at coadd level.**  Subtract the step-5 model
+   from the restored, sky-fitted coadd, then the existing lsst-mdet
+   anchor-ring amplitude refit with the deep S/N.  Masking stays.
 
-Steps 1-2 need the coadd side only and settle the background question.
-Steps 3-5 are the star side.  Option 2 (pre-subtract on visits and
-recoadd) is the fallback if step 1 does not remove the trough, which
-would mean coadd assembly also acts on the wings.
+7. **Integration and validation.**  Either lsst-mdet runs the
+   restoration on the fly (~230 small butler gets, 3-5 minutes per
+   patch) or the per-cell polynomial structure is written once as a
+   small per-patch product and read; the product decouples the codes.
+   Validate with the dual-state stack on the final images in all bands
+   (only i checked so far) and the amplified injection test.  Check
+   DP2 at NERSC with `lsst-starsub-check-datasets` (the DP2 collection
+   may carry the rewritten `deep_coadd` instead of
+   `deep_coadd_cell_predetection`, which needs a loading path).
+
+Option 2 (pre-subtract on visits and recoadd) is no longer needed as
+a fallback: step 1 showed the trough is removable on the existing
+coadds.
 
 ## Smaller items
 
