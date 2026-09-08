@@ -28,17 +28,20 @@ def main():
     did = coadd_data_id(args.tract, args.patch, args.band)
     ok = True
 
-    for name in ('deep_coadd_cell_predetection', 'deep_coadd_background'):
+    for name in ('deep_coadd_cell_predetection', 'deep_coadd',
+                 'deep_coadd_background'):
         try:
             have = butler.exists(name, did)
         except Exception as err:
             have = False
             print(f'  {name}: error {err!r}')
         print(f'  {name}: {"ok" if have else "MISSING"}')
-        ok &= bool(have)
+        if name != 'deep_coadd_cell_predetection':
+            ok &= bool(have)
 
     try:
-        mcoadd = butler.get('deep_coadd_cell_predetection', dataId=did)
+        from ..coadd import load_cell_coadd
+        mcoadd = load_cell_coadd(butler, did)
     except Exception as err:
         print(f'  cannot read the cell coadd ({err!r}); stopping')
         return

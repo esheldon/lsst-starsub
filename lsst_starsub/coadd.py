@@ -37,6 +37,33 @@ def coadd_data_id(tract, patch, band):
     return dict(band=band, skymap=SKYMAP, tract=tract, patch=patch)
 
 
+def load_cell_coadd(butler, did):
+    """
+    the None-state cell coadd as a MultipleCellCoadd:
+    deep_coadd_cell_predetection where present (the weekly
+    runs), else DP2's deep_coadd, a lsst.images CellCoadd with
+    the object background subtracted, restored
+    (apply_background(None)) and converted to the legacy class
+    (per-cell inputs with weights, stitch, grid, wcs)
+    """
+    try:
+        have = bool(butler.exists('deep_coadd_cell_predetection', did))
+    except Exception:
+        have = False
+    if have:
+        return butler.get('deep_coadd_cell_predetection', dataId=did)
+    cc = butler.get('deep_coadd', dataId=did)
+    if not hasattr(cc, 'to_legacy_cell_coadd'):
+        raise RuntimeError(
+            'deep_coadd is not a cell coadd and '
+            'deep_coadd_cell_predetection is absent'
+        )
+    print('    deep_coadd is a CellCoadd: restoring its object '
+          'background and converting to the legacy class')
+    cc.apply_background(None)
+    return cc.to_legacy_cell_coadd()
+
+
 def load_coadd(butler, tract, patch, band):
     """
     the deep coadd (object background subtracted, as delivered),
@@ -374,6 +401,10 @@ class PolynomialCache(object):
         entry = self.get(visit, detector)
         return None if entry is None else entry[3]
 
+    def _spawn(self, butler):
+        """a fresh cache of the same kind on another butler"""
+        return PolynomialCache(butler, factor=self.factor, order=self.order)
+
     def prefetch_parallel(self, keys, repo, collection, nproc):
         """
         prefetch with nproc forked workers, each with its own
@@ -393,18 +424,22 @@ class PolynomialCache(object):
         )
         nchunk = min(len(keys), nproc * 4)
         chunks = [keys[i::nchunk] for i in range(nchunk)]
+        global _WORKER_PROTO
+        _WORKER_PROTO = self
         ctx = mp.get_context('fork')
         done = 0
         with ctx.Pool(nproc) as pool:
             for out in pool.imap_unordered(
                 _prefetch_worker,
-                [(repo, collection, self.factor, self.order, c)
-                 for c in chunks],
+                [(repo, collection, c) for c in chunks],
             ):
-                for key, entry in out:
+                for key, entry, stats in out:
                     self._models[key] = entry
+                    if stats is not None:
+                        getattr(self, 'stats', {})[key] = stats
                 done += len(out)
                 print(f'    {done} of {len(keys)} inputs loaded')
+        _WORKER_PROTO = None
 
     def prefetch(self, keys):
         """load every (visit, detector) in keys, with progress"""
@@ -442,7 +477,7 @@ class PolynomialCache(object):
 
 def polynomial_cell_coadd(butler, mcoadd, step=CELL_STEP,
                           factor=COARSE_FACTOR, repo=None,
-                          collection=None, nproc=1):
+                          collection=None, nproc=1, cache=None):
     """
     the background the cell coadd lost, cell by cell: for each
     cell the weighted mean over its inputs of their stored
@@ -458,6 +493,9 @@ def polynomial_cell_coadd(butler, mcoadd, step=CELL_STEP,
         Sampling step within a cell (pixels)
     factor: int, optional
         Downsampling of the rendered polynomials
+    cache: PolynomialCache, optional
+        A prebuilt cache (e.g. a trough.ResponseCache) instead of
+        the stored polynomials
 
     Returns
     -------
@@ -469,7 +507,8 @@ def polynomial_cell_coadd(butler, mcoadd, step=CELL_STEP,
         structure to restore), the weight sum per cell and the
         input count per cell
     """
-    cache = PolynomialCache(butler, factor=factor)
+    if cache is None:
+        cache = PolynomialCache(butler, factor=factor)
     bb = mcoadd.inner_bbox
     ny, nx = bb.getHeight(), bb.getWidth()
 
@@ -534,6 +573,7 @@ _WORKER_CACHE = None
 _WORKER_MCOADD = None
 _WORKER_STEP = CELL_STEP
 _WORKER_BUTLER = None
+_WORKER_PROTO = None
 
 
 def _compute_cell(cache, mcoadd, index, step):
@@ -619,19 +659,26 @@ def _cell_worker(indices):
 
 def _prefetch_worker(args):
     """
-    load a chunk of inputs in a worker with its own butler;
-    returns [(key, coarse, wcs, bbox, level), ...]
+    load a chunk of inputs in a worker with its own butler and a
+    cache spawned from the prototype set by prefetch_parallel;
+    returns [(key, entry, stats), ...]
     """
     global _WORKER_BUTLER
-    repo, collection, factor, order, keys = args
+    repo, collection, keys = args
     if _WORKER_BUTLER is None:
         from lsst.daf.butler import Butler
         _WORKER_BUTLER = Butler(repo, collections=[collection])
-    cache = PolynomialCache(_WORKER_BUTLER, factor=factor, order=order)
+    cache = _WORKER_PROTO._spawn(_WORKER_BUTLER)
     out = []
     for v, d in keys:
-        entry = cache.get(v, d)
-        out.append(((int(v), int(d)), entry))
+        key = (int(v), int(d))
+        try:
+            entry = cache.get(v, d)
+        except Exception as err:
+            print(f'    input {v} {d} FAILED: {err!r}')
+            entry = None
+        stats = getattr(cache, 'stats', {}).get(key)
+        out.append((key, entry, stats))
     return out
 
 

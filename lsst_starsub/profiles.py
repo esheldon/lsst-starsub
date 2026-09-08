@@ -156,18 +156,24 @@ def usable_pixels(good, seg, stars, st, sl, rr, wide=True):
 
     ny, nx = ok.shape
     y0, x0 = sl[0].start, sl[1].start
-    gy, gx = np.mgrid[y0:y0 + ny, x0:x0 + nx]
     for ot in stars:
         if ot['x'] == st['x'] and ot['y'] == st['y']:
             continue
         orad = exclusion_radius(float(ot['G']), wide)
         ox, oy = float(ot['x']), float(ot['y'])
-        # skip stars whose zone cannot touch the window
-        if (ox + orad < x0 or ox - orad > x0 + nx
-                or oy + orad < y0 or oy - orad > y0 + ny):
+        # the neighbor's zone clipped to the window; the radius
+        # test runs on that sub-box only (a full-window hypot per
+        # neighbor made this quadratic in the star count times
+        # the window area on dense fields)
+        bx0 = max(0, int(np.floor(ox - orad)) - x0)
+        bx1 = min(nx, int(np.ceil(ox + orad)) - x0 + 1)
+        by0 = max(0, int(np.floor(oy - orad)) - y0)
+        by1 = min(ny, int(np.ceil(oy + orad)) - y0 + 1)
+        if bx1 <= bx0 or by1 <= by0:
             continue
-        orr = np.hypot(gy - oy, gx - ox)
-        ok &= orr > orad
+        gy, gx = np.mgrid[by0 + y0:by1 + y0, bx0 + x0:bx1 + x0]
+        sub = ok[by0:by1, bx0:bx1]
+        sub &= np.hypot(gy - oy, gx - ox) > orad
     return ok
 
 
@@ -175,7 +181,8 @@ LOCAL_REF = (500.0, 600.0)   # d - r_mask range of the local reference
 
 
 def measure_profiles(states, vexp, stars, seg, gmax=17.0, mode='r',
-                     ambient=None, wide=True, local_ref=LOCAL_REF):
+                     ambient=None, wide=True, local_ref=LOCAL_REF,
+                     edges=None, gmin=None):
     """
     per-star profiles on every image state, in sky-sigma units
 
@@ -195,6 +202,11 @@ def measure_profiles(states, vexp, stars, seg, gmax=17.0, mode='r',
         'r': log annuli in radius from the star (radial_edges);
         'dmask': linear annuli in the distance beyond the
         star's mask radius (dmask_edges)
+    edges: array, optional
+        Annulus edges overriding the mode's default (in the
+        mode's convention)
+    gmin: float, optional
+        Measure only stars at or fainter than this
     ambient: dict, optional
         name -> level subtracted from each state before the
         measurement (ambient_levels)
@@ -214,7 +226,9 @@ def measure_profiles(states, vexp, stars, seg, gmax=17.0, mode='r',
     (sky-sigma units, ambient-referenced), npix, local (the
     local reference level, NaN when unmeasurable), nlocal
     """
-    if mode == 'r':
+    if edges is not None:
+        edges = np.asarray(edges, dtype='f8')
+    elif mode == 'r':
         edges = radial_edges()
     elif mode == 'dmask':
         edges = dmask_edges()
@@ -231,6 +245,8 @@ def measure_profiles(states, vexp, stars, seg, gmax=17.0, mode='r',
     rows = []
     for si, st in enumerate(stars):
         if not st['on_image'] or float(st['G']) >= gmax:
+            continue
+        if gmin is not None and float(st['G']) < gmin:
             continue
         rad = float(circle_radius(float(st['G'])))
         # absolute-radius edges for the annuli; the window

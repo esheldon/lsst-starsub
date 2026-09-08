@@ -173,6 +173,8 @@ def main():
         + f' [{args.ref} reference, clip {args.clip:g}]'
     )
     fig.tight_layout()
+    if not os.path.splitext(args.output)[1]:
+        args.output += '.png'
     print('writing:', args.output)
     fig.savefig(args.output, dpi=110)
 

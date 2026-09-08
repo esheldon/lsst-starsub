@@ -69,25 +69,124 @@ stars) with `lsst-starsub-cell-restore` and `lsst-starsub-make-slurm-cells`:
   input count per cell varies.  Future reprocessings may differ;
   build for the data as they are.
 
+## Step 2 status (2026-09-08)
+
+The operator is reproduced (`lsst_starsub/forward.py`,
+`lsst-starsub-forward-check`; outputs in `~/oh/starsub-visits/forward/`).
+What the stored layer 0 actually is, from the `calibrateImage` source
+and its stored config, log and metadata:
+
+- Not the first-pass fit.  `_remeasure_star_background` adds the
+  first fit back and refits the raw sky image (`star_background`:
+  128 px bins, MEANCLIP, weighted 6x6 Chebyshev; BAD, EDGE, DETECTED,
+  DETECTED_NEGATIVE, NO_DATA ignored; SAT/SUSPECT/SPIKE are ignored
+  only by the order-0 pedestal fits that follow, layers 1..).
+- The mask it saw is not stored (the preliminary image carries the
+  final 5-sigma detection instead).  It is rebuilt from the rules:
+  detection on the raw sky image at the threshold stored in
+  `calibrateImage_metadata` (`adaptive_threshold_value`, 0.2 x the
+  median sky x 1.07 in pixel-sigma units: 306 and 663 on the two
+  test detectors), footprints grown by 70 psf sigma (110-180 px),
+  ORed with the first-pass 50-sigma detections dilated by 10 px.
+  Rebuilt detected fractions match the log to 0.1 percent (0.336 vs
+  0.335, 0.4485 vs 0.449); the refit matches the stored surface to
+  0.03 nJy rms on 2025071900593-090 and 0.13 nJy on 2025121600098-004
+  (structure rms 0.6 and 2.0 nJy).
+- The fit is not linear in the image: the bin weights come from
+  the scatter of the pixel values in each bin, so the star image
+  must not be fit alone (15 times too small).  The response is
+  fit(raw) - fit(raw - star), which agrees with fit(raw + star) -
+  fit(raw) to 0.3 percent.
+- Bright stars are masked to ~200 px, so the polynomial only ever
+  sees the wing beyond that, and the bump is set by the first ~200
+  px outside the mask where the wing is steepest.  Around the G 7.6
+  star on detector 4 the stored bump is +6.2 nJy at the star,
+  falling to zero at 950 px and to -2 nJy at 1400 px (the
+  Chebyshev ringing that is the coadd trough); the refit gives
+  5.8; the response to the visit-fitted lsst-mdet template gives
+  3.1, half, because the template ends at ~900 px and is the
+  unreliable per-detector kind.  Fainter stars' bumps (0.2-0.5 nJy)
+  are below the sky's own order-3+ structure (+-1.5 nJy), so the
+  per-input check only works on the brightest stars; the coadd
+  stack remains the test for the rest.
+- Remaining for step 2: the coadd comparison needs a wing model
+  beyond the template extent, i.e. step 4 (pooled per-visit
+  template plus aureole).  With it, per input the response is two
+  fits (~10 s with the butler reads), combined per cell as in step 1.
+
+## Step 4 status (2026-09-08)
+
+Built and run on visit 2025071900593 (i), all 180 detectors, one
+slurm job per detector (`lsst-starsub-make-slurm-template`, 1-6 min
+and 2.4 GB each), pooled with `lsst-starsub-visit-template
+--from-extracts`; outputs in `~/oh/starsub-visits/templates/`.
+
+- Per detector (`lsst_starsub.template.extract_detector`, ~1 min):
+  template-star stamps (G 15.5-17.5) from the restored image with a
+  256 px wide-exclusion sky pass, stamps inside a brighter star's
+  wide zone dropped; and the flux-normalized wing profile of every
+  census star to G 15.5 on the `warp` state (no detector-scale sky
+  fit), bright stars (G < 13.5) to 2500 px, the rest to 900 px,
+  ambient-referenced.  A per-visit Gaia extract comes from the
+  refcat shards over the visit's bounding circle
+  (`lsst_starsub.gaia`; a visit spans ~10 tracts).
+- Pooled: 3052 stamps, 3337 wing stars.  The wing is fit jointly to
+  the stack profile (10-50 px, template units) and the per-G-bin
+  cloud (40-2500 px, nJy per unit Gaia flux, error-weighted) as two
+  power laws plus the zero point k_in (`fit_wing_model`).  The
+  single-law stack fit alone is misleading: its 22-50 px slope
+  (-3.87, the canonical i value) is the blend of both components,
+  since the cloud is already flatter by 50 px.
+- Result: inner slope -4.35, aureole slope -2.60; the model matches
+  the stack to 1-4 percent from 10 to 50 px and the cloud to +-10
+  percent from 46 to 550 px (G 6-10 stars carry it beyond 190 px).
+  Beyond ~650 px the bright stars sit 1.3-1.6 (+-0.5-0.7) above the
+  law and beyond 1000 px they are consistent with zero; a single
+  visit cannot do better there: per-star local sky offsets of the
+  warp state (a few nJy) exceed the wing.  The far cloud is kept in
+  every extract for pooling across visits.
+- A 6-detector subset is not enough (the aureole slope ran to its
+  bound); all detectors, or a spread of a few dozen, are needed.
+- Next: the other 59 visits of patch 53 (and the 2562 inputs) to
+  see how the parameters vary with seeing (fwhm 1.07-1.25 within
+  this visit alone), then the cross-visit far-wing pooling.  New
+  extracts also carry the stamp core amplitudes for a direct zero
+  point (`k_stamp`) to check the fitted k_in.
+
+## The wide-field test set (2026-09-08)
+
+The weekly run only covers 45 tracts around the two deep fields, so
+the representative test moved to DP2 (`--repo dp2_prep_future
+--collection LSSTCam/runs/DRP/DP2`): tract 7275 patch 55 i (RA 317,
+Dec -14, b -37), 28 visits, 94 inputs, 16-26 inputs per cell, FWHM
+0.89-1.69".  DP2 has no `visit_image` (the preliminary image is
+calibrated instead) and its `deep_coadd` is the new `CellCoadd`
+(`coadd.load_cell_coadd` restores its object background and converts
+it); the `calibrateImage` background algorithm is the same, so the
+forward model applies unchanged.  Outputs: `~/oh/starsub-visits/
+07275-55/` (single-patch restoration, visit-level profiles of the 94
+inputs), `07275-cells/i/` (all 100 patches), `templates/` (one
+template job per detector of the 28 visits, `extracts-{visit}/`).
+
+- Visit level, 94 inputs: the same trough as the deep field.
+  `delivered` at the global reference, G 6-13: -5.3, -6.6, -5.0 x
+  10^-3 sigma at 205, 305, 455 px beyond the mask (about -0.15 nJy);
+  `warp` +2.3, +1.5, -0.6.
+- Only patches 55 and 56 of the tract are covered entirely by the 28
+  visits; the tract has 65 visits.  The forward model on more patches
+  needs the other 37 visits' templates (about 6700 more jobs).
+
 ## Steps
 
 1. **Restore the polynomial at the coadd level.**  DONE (see status
    above).  The statistical restoration stays as the deep-field method
    and as the reference for step 2.
 
-2. **Forward-model the trough.**  The polynomial's response to a star
-   is a linear projection of the wing image onto the input's Chebyshev
-   fit, with DM's 128 px binning and the detection mask the fit saw.
-   Per input: render the census stars' wings from the template on the
-   detector, run the same background fit (`SubtractBackgroundTask`
-   config of `calibrateImage`: binSize 128, Chebyshev 6x6, weighted,
-   masked planes), take the fit surface as the star response.  Check
-   against the stored polynomials' structure around bright stars on a
-   few tract-2395 inputs, then combine per cell with the input weights
-   and compare the trough model with the `None` stack on both tracts.
-   No sky terms, no depth dependence; step 4 needs it regardless.  If
-   it disagrees, the mask the fit saw (the preliminary image's mask
-   plane is stored) is the first suspect.
+2. **Forward-model the trough.**  Operator DONE (status above); the
+   coadd-level comparison waits on the step-4 wing model.  Per input:
+   rebuild the fit mask, response = fit(raw) - fit(raw - star wings),
+   combine per cell with the input weights, compare the trough model
+   with the `None` stack on both tracts.
 
 3. **Sky model on the restored coadd.**  Simplified by the
    structure-only restoration: the restored sky is the `None` sky,
@@ -96,9 +195,10 @@ stars) with `lsst-starsub-cell-restore` and `lsst-starsub-make-slurm-cells`:
    10^-3 sigma beyond 300 px on the visits).
 
 4. **Per-visit wing characterization, pooled over the focal plane.**
-   One template and aureole per visit from all its detectors, stamps
-   inside bright-star halos excluded; per-detector templates (20-25
-   stamps) scatter from -2.6 to -4.8 in slope and are not usable.
+   Tooling DONE and validated on one visit (status above); run over
+   the patch-53 visits, check the seeing dependence, pool the far
+   wing across visits.  Per-detector templates (20-25 stamps)
+   scatter from -2.6 to -4.8 in slope and are not usable.
 
 5. **Carry the visit wing models into the coadd.**  Per cell, the star
    model is the input-weighted mean of the per-visit wing models minus

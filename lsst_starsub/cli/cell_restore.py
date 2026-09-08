@@ -122,7 +122,9 @@ def main():
         build_star_mask, field_segmentation, select_stars,
     )
     from lsst_mdet.wcs import ButlerWcs
-    from ..coadd import coadd_data_id, polynomial_cell_coadd
+    from ..coadd import (
+        coadd_data_id, load_cell_coadd, polynomial_cell_coadd,
+    )
     from ..io import _meta_table
     from ..profiles import ambient_levels, measure_profiles
     from ..visit import (
@@ -137,7 +139,7 @@ def main():
     did = coadd_data_id(args.tract, args.patch, args.band)
 
     print('loading the cell coadd')
-    mcoadd = butler.get('deep_coadd_cell_predetection', dataId=did)
+    mcoadd = load_cell_coadd(butler, did)
     stitched = mcoadd.stitch()
     none = np.ascontiguousarray(stitched.image.array, dtype='f4')
     var = np.ascontiguousarray(stitched.variance.array, dtype='f4')

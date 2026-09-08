@@ -588,17 +588,32 @@ def load_visit_exposure(butler, visit, detector, rng=None):
     did = dict(instrument=INSTRUMENT, visit=int(visit),
                detector=int(detector))
     print(f'    loading visit {visit} detector {detector}')
-    exp = butler.get('visit_image', dataId=did)
-    prelim_bg = butler.get(
-        'preliminary_visit_image_background', dataId=did,
-    )
-    skycorr = butler.get('skyCorr', dataId=did)
     # the preliminary image's calibration: ADU -> nJy for the
     # stored (ADU) backgrounds.  The visit_image photoCalib is
     # 1 (already nJy), so the value has to come from the
     # preliminary image
     prelim = butler.get('preliminary_visit_image', dataId=did)
     calib = float(prelim.getPhotoCalib().getCalibrationMean())
+    try:
+        have_vi = bool(butler.exists('visit_image', did))
+    except Exception:
+        have_vi = False
+    if have_vi:
+        exp = butler.get('visit_image', dataId=did)
+    else:
+        # DP2 has no visit_image: the preliminary image
+        # calibrated to nJy stands in.  On the weekly run the
+        # two differ by 1.4 nJy rms (0.04 sky sigma), the final
+        # calibration's spatial variation
+        print('    no visit_image; calibrating the preliminary image')
+        exp = prelim.clone()
+        exp.setMaskedImage(
+            prelim.getPhotoCalib().calibrateImage(prelim.getMaskedImage())
+        )
+    prelim_bg = butler.get(
+        'preliminary_visit_image_background', dataId=did,
+    )
+    skycorr = butler.get('skyCorr', dataId=did)
 
     if len(prelim_bg) < 2:
         raise RuntimeError(

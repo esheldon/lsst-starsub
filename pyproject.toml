@@ -16,6 +16,10 @@ lsst-starsub-make-slurm = "lsst_starsub.cli.make_slurm:main"
 lsst-starsub-cell-restore = "lsst_starsub.cli.cell_restore:main"
 lsst-starsub-make-slurm-cells = "lsst_starsub.cli.make_slurm_cells:main"
 lsst-starsub-check-datasets = "lsst_starsub.cli.check_datasets:main"
+lsst-starsub-forward-check = "lsst_starsub.cli.forward_check:main"
+lsst-starsub-visit-template = "lsst_starsub.cli.visit_template:main"
+lsst-starsub-make-slurm-template = "lsst_starsub.cli.make_slurm_template:main"
+lsst-starsub-cell-forward = "lsst_starsub.cli.cell_forward:main"
 
 [tool.setuptools.packages.find]
 include = ["lsst_starsub*"]
