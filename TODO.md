@@ -756,6 +756,65 @@ template job per detector of the 28 visits, `extracts-{visit}/`).
      of flat beyond the mask on a survey-wide sample; the residual
      structure that remains is the magnitude-dependent plateau
      above.
+   - is the plateau the star's own detected features (spikes,
+     halo blobs), which the joint fit excludes through the deep
+     segmentation but the residual profiles keep?  Checked on
+     tract 2558 with a second set of profile tables measured on
+     the fit's own pixels (`profiles_fitpix`,
+     `profiles_dmask_fitpix`, with their own ambient reference:
+     the masked pixels sit 28 x 10^-3 sigma below the all-pixel
+     level, the faint-source light the mask removes).  135 stars
+     G < 13: the residual / model ratio on the fit's pixels equals
+     the all-pixel one within 1-2 sigma at every radius (144 px:
+     +3.2 vs +3.2 percent; 178: -2.9 vs -3.9; 221: -2.9 vs -6.3,
+     errors 1.5-3), and the equal-weight stacks agree within 1.5
+     sigma.  So the plateau is in the pixels the fit used: wing
+     light with a shape the model lacks, not spikes.  The
+     magnitude term is worth building.
+   - slurm on milano / rubin:default is a preemptable QOS
+     ("CANCELLED by 0"): pass 2 lost 94 patches and 2b 71 to
+     preemption, the fit-pixel run 68 then 48; `scripts/
+     resubmit_preempted.sh JOBDIR PATTERN` sweeps and resubmits.
+     Always sweep before counting outputs.
+   - the magnitude term (`lsst_starsub/wing.py` WingModel, HDU
+     'magterm' in the wing file, `scripts/magterm_wing.py`):
+     T_G(r) = T(r) (1 + c(G, r / r_mask)), c measured on pass 2b
+     (28,583 stars) in 5 G bins x 9 bins of r / r_mask, applied
+     where measured to 3 percent.  It grows toward the faint
+     end: G 6-10 within +-1 percent; 10-11.5 +4 at the mask edge,
+     -1.5 at 1.3-1.75, +4 at 2-3 radii; 11.5-13 +3 to +4 at 1-2
+     radii; 13-14.5 +4 to +12 at 1-2.5 radii, -10 at 3-4; 14.5-17
+     +8 to +20 at 1-3 radii.  Read as the coadd PSF's wing at
+     20-100 px being broader than the visit-derived shape, met at
+     different mask-relative radii by each magnitude.  The joint
+     fit renders each star with its own profile (87 s per patch).
+     Pass 3 (12 tracts) and an injected control on 7275 (the
+     injected truth is the base wing, so their model error shows
+     the term itself) run 2026-09-09; the test is whether the
+     re-measured term goes to zero and the equal-weight stacks
+     improve, or whether the fit absorbs it as it absorbed the
+     radial correction.
+     Result: absorbed.  Re-measured on pass 3 (28,971 stars) the
+     term is unchanged at the mask edge (+2.9, +4.6, +7.5 percent
+     for G 11.5-13, 13-14.5, 14.5-17) and reduced by a third at
+     1.5-2.5 radii (G 13-14.5: +8.8 / +11.9 to +6.4 / +8.5; G
+     14.5-17: +13 / +17 to +9 / +11); the equal-weight stacks are
+     identical to pass 2b within errors on every tract (9812 G
+     14-15.2 at 55 px 10.1 to 6.5 is the largest move, 1 sigma);
+     the injected control is undamaged (injected residual within
+     +-4, the model error of the bright bin from +8 to -3 as the
+     amplitudes re-anchored 3 percent lower).  The amplitude fit
+     re-anchors on whatever shape it is given, so the profile's
+     residual-to-model ratio at the anchor is invariant to shape
+     corrections; the ratio there is a data property (zero in the
+     simulation), a few percent of a small wing: +3 to +5 x 10^-3
+     sigma just outside the masks of G 13-17 stars, the collar at
+     its current size, comparable to the injection test's own
+     errors.  Stop iterating on the shape here; the acceptance
+     test (metadetection on cleaned patches vs the product) decides
+     whether that level matters.  If it does, the coadd's own
+     stamp stack for the inner 44 px joined to the broad far wing
+     is the physically motivated shape to try, not another table.
    - the injected stars' model error, +6 to +8 (a ~2 percent high
      amplitude), is the same with both segmentations; still to be
      understood (a bias of the ring-free amplitude toward the

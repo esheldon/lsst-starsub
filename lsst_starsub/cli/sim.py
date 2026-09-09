@@ -118,7 +118,7 @@ def main():
     from ..clean import clean_stem, clean_tag, run_clean, write_clean_file
     from ..profiles import ambient_levels, measure_profiles
     from ..sim import DEFAULTS, simulate_coadd
-    from ..template import read_canonical_wing
+    from ..wing import read_wing_model
     from ..visit import VisitExposure, make_visit_butler
 
     sys.stdout.reconfigure(line_buffering=True)
@@ -134,7 +134,7 @@ def main():
                           gmax=max(args.gsub, GMAX))
     x, y = gaia_pixel_positions(gaia, wcs, tbox)
     G = gaia['phot_g_mean_mag'].astype('f8')
-    canonical = read_canonical_wing(args.canonical)
+    canonical = read_wing_model(args.canonical)
 
     sim_name = os.path.join(
         args.outdir,

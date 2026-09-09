@@ -56,7 +56,7 @@ for tract, patch in jobs:
         continue
     with rustfits.FITS(f) as fits:
         names = [h.extname for h in fits]
-        prof = fits['profiles'].read()
+        prof = fits[os.environ.get('PROFILE_TABLE', 'profiles')].read()
         edges = fits['edges'].read()['edges'][0]
         stars = fits['gaia_stars'].read()
         sig = float(fits['meta'].read()['sky_sigma'][0])

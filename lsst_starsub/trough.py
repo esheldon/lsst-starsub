@@ -83,8 +83,9 @@ def render_wing_image(shape, x, y, gmag, rt, k_in, calib,
     shape: (ny, nx)
     x, y, gmag: arrays
         Detector-frame positions and Gaia G of the stars
-    rt: (r, T)
-        From radial_template
+    rt: (r, T), or an object with .profile(G) -> (r, T)
+        From radial_template, or a lsst_starsub.wing.WingModel
+        with a magnitude term
     k_in: float
         nJy per unit gaia flux per template unit
     calib: float
@@ -102,7 +103,9 @@ def render_wing_image(shape, x, y, gmag, rt, k_in, calib,
     image (ny, nx) f4, and the number of stars rendered
     """
     ny, nx = shape
-    r, T = rt
+    profile_fn = getattr(rt, 'profile', None)
+    if profile_fn is None:
+        r, T = rt
     image = np.zeros((ny, nx), dtype='f4')
     n = 0
     if amps is None:
@@ -110,6 +113,8 @@ def render_wing_image(shape, x, y, gmag, rt, k_in, calib,
     for xk, yk, gk, ak in zip(x, y, gmag, amps):
         if not gk < gmax or not ak > 0:
             continue
+        if profile_fn is not None:
+            r, T = profile_fn(float(gk))
         amp = ak * k_in * 10.0 ** (-0.4 * gk) / calib
         prof = amp * T
         below = np.flatnonzero(prof < eps)

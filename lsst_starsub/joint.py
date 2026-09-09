@@ -128,9 +128,11 @@ def render_mesh(nodes, values, shape):
 def star_column(cy, cx, x, y, G, canonical, b=BIN, eps=EPS):
     """
     the star's wing at the cell centers within its window:
-    (cell indices, values) with A = 1 the prediction
+    (cell indices, values) with A = 1 the prediction; canonical
+    is (r, T) or a WingModel (per-star shape)
     """
-    r, T = canonical
+    profile_fn = getattr(canonical, 'profile', None)
+    r, T = canonical if profile_fn is None else profile_fn(float(G))
     flux = 10.0 ** (-0.4 * G)
     prof = flux * T
     below = np.flatnonzero(prof < eps)

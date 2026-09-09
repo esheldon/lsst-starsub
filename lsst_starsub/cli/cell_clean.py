@@ -195,8 +195,8 @@ def main():
     canonical = None
     if (args.star_model not in ('template', 'joint') or args.inject
             or (args.star_model == 'joint' and args.joint_shape == 'canonical')):
-        from ..template import read_canonical_wing
-        canonical = read_canonical_wing(args.canonical)
+        from ..wing import read_wing_model
+        canonical = read_wing_model(args.canonical)
 
     inj = None
     truth = None

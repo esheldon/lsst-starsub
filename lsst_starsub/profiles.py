@@ -182,7 +182,7 @@ LOCAL_REF = (500.0, 600.0)   # d - r_mask range of the local reference
 
 def measure_profiles(states, vexp, stars, seg, gmax=17.0, mode='r',
                      ambient=None, wide=True, local_ref=LOCAL_REF,
-                     edges=None, gmin=None):
+                     edges=None, gmin=None, good=None):
     """
     per-star profiles on every image state, in sky-sigma units
 
@@ -207,6 +207,9 @@ def measure_profiles(states, vexp, stars, seg, gmax=17.0, mode='r',
         mode's convention)
     gmin: float, optional
         Measure only stars at or fainter than this
+    good: bool array, optional
+        Overrides vexp.good as the usable-pixel mask (e.g. with a
+        detection mask applied, the star's own features included)
     ambient: dict, optional
         name -> level subtracted from each state before the
         measurement (ambient_levels)
@@ -241,7 +244,8 @@ def measure_profiles(states, vexp, stars, seg, gmax=17.0, mode='r',
     if ambient is None:
         ambient = {name: 0.0 for name in names}
 
-    good = vexp.good
+    if good is None:
+        good = vexp.good
     rows = []
     for si, st in enumerate(stars):
         if not st['on_image'] or float(st['G']) >= gmax:

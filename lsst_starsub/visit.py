@@ -376,9 +376,8 @@ def render_canonical_stars(shape, stars, canonical, gsub=GSUB, amps=None,
     """
     from .trough import render_wing_image
 
-    r, T = canonical
     image, n = render_wing_image(
-        shape, stars['x'], stars['y'], stars['G'], (r, T), 1.0, 1.0,
+        shape, stars['x'], stars['y'], stars['G'], canonical, 1.0, 1.0,
         gmax=gsub, eps=0.005, amps=amps,
     )
     if verbose:

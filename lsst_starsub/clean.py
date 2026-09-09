@@ -81,16 +81,45 @@ def run_clean(vexp, gaia, tbox, state_name, gsub, nround, grow_bright,
         states, vexp, res['stars'], seg, ambient=ambient, mode='dmask',
     )
     star_table = res['star_table']
+    extra = {}
+    if star_model == 'joint':
+        # the same profiles on the pixels the joint fit used: the
+        # deep segmentation of the residual applied as a mask,
+        # the star's own detected features (spikes, halo blobs)
+        # included in it
+        from .joint import deep_segmentation
+        det = deep_segmentation(residual, vexp.good, vexp.sky_sigma)
+        good_fit = vexp.good & ~det
+        zero_seg = np.zeros(seg.shape, dtype=seg.dtype)
+        # their own ambient reference, on the same pixels (the
+        # masked pixels sit below the all-pixel level by the
+        # faint-source light the mask removes)
+        ambient_fit = ambient_levels(states, vexp, zero_seg,
+                                     wide | ~good_fit)
+        print('    ambient levels on the fit pixels (nJy): ' + ', '.join(
+            f'{k} {v:.2f}' for k, v in ambient_fit.items()
+        ))
+        _, ptable_fit = measure_profiles(
+            states, vexp, res['stars'], zero_seg, ambient=ambient_fit,
+            good=good_fit,
+        )
+        _, dtable_fit = measure_profiles(
+            states, vexp, res['stars'], zero_seg, ambient=ambient_fit,
+            mode='dmask', good=good_fit,
+        )
+        extra['profiles_fitpix'] = ptable_fit
+        extra['profiles_dmask_fitpix'] = dtable_fit
     if inj is not None:
         from .inject import flag_injected
         star_table = flag_injected(star_table, inj)
         ptable = flag_injected(ptable, inj)
         dtable = flag_injected(dtable, inj)
+        extra = {k: flag_injected(v, inj) for k, v in extra.items()}
     return dict(
         res=res, states=states, seg=seg, ambient=ambient,
         edges=edges, ptable=ptable, dedges=dedges, dtable=dtable,
         star_table=star_table, truth=truth, inj=inj,
-        sky_sigma=vexp.sky_sigma, vexp=vexp,
+        sky_sigma=vexp.sky_sigma, vexp=vexp, extra_tables=extra,
     )
 
 
@@ -139,7 +168,8 @@ def write_clean_file(stem, out, meta, no_images=False, extra_tables=None):
         dedges_t['edges'][0] = dedges
         fits.write_table(dedges_t, extname='dmask_edges')
         fits.write_table(_meta_table(meta), extname='meta')
-        for name, tab in (extra_tables or {}).items():
+        for name, tab in {**out.get('extra_tables', {}),
+                          **(extra_tables or {})}.items():
             fits.write_table(tab, extname=name)
     try:
         plot_summary(stem + '.png', out['vexp'], res, out['states'],

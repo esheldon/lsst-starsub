@@ -77,7 +77,7 @@ for tag in tags:
             continue
         with rustfits.FITS(f) as fits:
             names = [h.extname for h in fits]
-            prof = fits['profiles_dmask'].read()
+            prof = fits[os.environ.get('PROFILE_TABLE', 'profiles_dmask')].read()
             edges = fits['dmask_edges'].read()['edges'][0]
             inj = fits['injected'].read() if 'injected' in names else []
             sig = float(fits['meta'].read()['sky_sigma'][0])
