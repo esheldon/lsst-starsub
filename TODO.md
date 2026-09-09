@@ -263,6 +263,40 @@ template job per detector of the 28 visits, `extracts-{visit}/`).
   visit scatter, the bright stars' bumps are driven by the wing
   outside their ~200 px masks) and the rebuilt mask size for stars
   near the adaptive detection threshold (G 11-13).
+- Steps 5-6 first pass (`lsst-starsub-cell-clean`: the joint
+  sky-plus-template subtraction of handle_stars_visit run on a
+  patch's `none`, `restored` or `forward` = none + R state; 96
+  patches, 3 routes, 90 s each).  The three routes give the same
+  final residual within errors, e.g. G 6-13 (362 stars) at 55, 105,
+  205 px beyond the mask: none -13.6, -10.0, +1.0; forward -14.4,
+  -9.8, +1.2; restored -13.5, -8.9, +0.7 (errors ~2).  Reason: the
+  second-round 64 px sky pass is excluded only 12 px beyond every
+  mask (PRE_GROW; the lsst_mdet coadd route uses 128 px around the
+  bright stars, PRE_GROW_BRIGHT), so it follows the trough, R and
+  the wings themselves beyond ~76 px of the masks.  With that
+  configuration the trough is irrelevant to the final image and
+  the residual collar near the masks (-14 x 10^-3 sigma at 55 px
+  for G < 13, -10 for G 13-14, -6 for G 14-15.2) is a property of
+  the subtraction, not of the trough.  Next: the same three routes
+  with the bright-star exclusion of the coadd route in the final
+  sky passes, where the trough correction has to carry the load.
+  `07275-cells/clean/clean-compare-100patches.png`.
+- Same three routes with the coadd route's 128 px bright-star
+  exclusion in the 64 px sky passes (`--bright-grow 128`,
+  `clean-bright/`): still the same residual within errors.  G 6-13
+  at 55, 105, 205 px: none -0.6, -21.7, -2.2; forward +1.6, -18.6,
+  -2.0; restored +3.4, -17.7, -2.2 (errors 4.5, 3.4, 1.7).  The
+  trough correction moves the residual by +3 x 10^-3 sigma at 105
+  px, one sigma.  Conclusion: a 64 px sky pass allowed anywhere
+  within ~500 px of a bright star follows the trough whether or not
+  it was corrected; the correction can only matter for a sky model
+  kept beyond the trough (round 1's wide exclusion alone), and no
+  configuration in use does that.  The residual that remains, a
+  -20 x 10^-3 sigma dip at ~105 px beyond the bright-star masks
+  with the bright exclusion (-14 at 55 px without it), is the
+  subtraction's own collar: template shape and anchor-ring
+  amplitudes, the lsst_mdet "monster collar" problem, independent
+  of the trough.  `clean-bright/clean-compare-100patches.png`.
 - The large-scale negative tail of the stacks is the polynomials'
   ringing.  Mean image level against distance to the nearest G < 13
   star over 30 patches (patch median removed, 10^-3 sigma): `none`
@@ -295,44 +329,448 @@ template job per detector of the 28 visits, `extracts-{visit}/`).
    above).  The statistical restoration stays as the deep-field method
    and as the reference for step 2.
 
-2. **Forward-model the trough.**  Operator DONE (status above); the
-   coadd-level comparison waits on the step-4 wing model.  Per input:
-   rebuild the fit mask, response = fit(raw) - fit(raw - star wings),
-   combine per cell with the input weights, compare the trough model
-   with the `None` stack on both tracts.
+2. **Forward-model the trough.**  DONE.  The response operator
+   reproduces the stored fits; with the canonical wing it predicts
+   the restoration to 10-30 percent for G < 13 over the tract.
 
-3. **Sky model on the restored coadd.**  Simplified by the
-   structure-only restoration: the restored sky is the `None` sky,
-   smooth, so the existing wide-exclusion sky fit applies.  Rework the
-   refit that still takes wing at G 13-14 (`flat` state -2 to -3 x
-   10^-3 sigma beyond 300 px on the visits).
+3. **Sky model.**  Superseded by the steps 5-6 finding: the 64 px sky
+   passes of the joint routine follow the trough and the correction
+   alike, so no separate sky rework is needed for the trough.
 
 4. **Per-visit wing characterization, pooled over the focal plane.**
-   Tooling DONE and validated on one visit (status above); run over
-   the patch-53 visits, check the seeing dependence, pool the far
-   wing across visits.  Per-detector templates (20-25 stamps)
-   scatter from -2.6 to -4.8 in slope and are not usable.
+   DONE on the 65 visits of tract 7275: one canonical wing per band
+   suffices for the trough model (2 percent).  Left: the cross-visit
+   far-wing pooling beyond 500 px if the bright-star residual of the
+   forward model needs it, and the other bands.
 
-5. **Carry the visit wing models into the coadd.**  Per cell, the star
-   model is the input-weighted mean of the per-visit wing models minus
-   their step-2 polynomial responses, with the cell's input weights.
-   Keeps the per-visit seeing dependence without special coadds
-   (subtraction commutes with the weighted mean, except at clipped
-   pixels and masked cores).
+5. **Carry the wing model into the coadd.**  DONE as the response
+   coadd R (`lsst-starsub-cell-forward`); the star model itself is
+   built on the coadd (step 6), the per-visit model is not needed.
 
-6. **Subtract and refit at coadd level.**  Subtract the step-5 model
-   from the restored, sky-fitted coadd, then the existing lsst-mdet
-   anchor-ring amplitude refit with the deep S/N.  Masking stays.
+6. **Subtract and refit at coadd level.**  DONE as
+   `lsst-starsub-cell-clean` (status above).  Result: the input route
+   (none / restored / forward) does not change the final residual in
+   either sky configuration; the residual collar around bright stars
+   is the subtraction's own.  Star models compared over the tract
+   (forward route, 128 px bright exclusion; G 6-13, 362 stars, at
+   55, 105, 205 px beyond the mask, 10^-3 sigma):
+   - stamp template with anchor-ring amplitudes: +1.6, -18.6, -2.0
+   - canonical wing, pure prediction: -20.1, -27.8, -5.0
+   - canonical shape with anchor-ring amplitudes: -2.5, -23.0, -2.0
+   The pure prediction over-subtracts by ~15 percent near the bright
+   stars, the same excess the forward-model comparison found for
+   G < 11; the amplitude fit removes that at the anchor but the -20
+   to -28 dip at ~105 px survives every model.  Fainter bins agree
+   within 1-2 sigma for all three.  So the dip is not the wing
+   model's shape at the level the two very different shapes test:
+   either the real wings fall faster than both between 55 and 105
+   px, or the sky interpolated under the 128 px exclusion is too
+   high there (it would bias every model the same way; in the 12 px
+   configuration the collar sits at 55 px instead).  The injection
+   test (step 7) separates the two.
+   `clean-bright/clean-compare-model-100patches.png`.
 
-7. **Integration and validation.**  Either lsst-mdet runs the
-   restoration on the fly (~230 small butler gets, 3-5 minutes per
-   patch) or the per-cell polynomial structure is written once as a
-   small per-patch product and read; the product decouples the codes.
-   Validate with the dual-state stack on the final images in all bands
-   (only i checked so far) and the amplified injection test.  Check
-   DP2 at NERSC with `lsst-starsub-check-datasets` (the DP2 collection
-   may carry the rewritten `deep_coadd` instead of
-   `deep_coadd_cell_predetection`, which needs a loading path).
+7. **Injection simulation** (the next step, 2026-09-08).  The data
+   cannot separate an algorithm artifact from star physics in the
+   collar (+60 x 10^-3 sigma at the mask edge, -20 at ~100 px, zero
+   by 200 px for G < 13; +45 / -20 at 0 / 20 px for the faint stars):
+   the wing model's shape, the anchor-ring bias, the interpolated sky
+   under the exclusion zone and real-star structure (color-dependent
+   halos, the spikes left in) all give the same signature, and the
+   real wings are not known independently of the same measurement.
+   So: inject synthetic stars with a known wing into the real coadds
+   (`lsst-starsub-cell-inject`):
+   - into the `forward` state, so the trough is out of the way;
+     random positions, G 6-17 spanning the bins, entered into the
+     Gaia census so masking and subtraction treat them as real; the
+     cores from the coadd's own PSF, so only the wing is a model;
+     the canonical wing as the truth.
+   - run the clean tool; compare the residual around the injected
+     stars (truth known) with the residual around the real stars in
+     the same bins.  Same collar: it is the algorithm, iterate with
+     truth in hand (ring radius, template junction, sky
+     interpolation).  Clean: the real wings differ from the model and
+     the collar is physics to be modeled.
+   - a wing deliberately 30 percent off, for the residual's
+     sensitivity to the wing model (the uncertainty left in the
+     trough work); and an amplified variant, wings 10x brighter, to
+     put the systematics above the noise.
+   - no butler needed: it runs on the cell files with the rendering
+     and profile code; an afternoon.  Not worth simulating: the
+     trough itself (provenance and operator established) and, yet,
+     the full shear simulation, which is the final arbiter but a
+     bigger build; the injection machinery is half of it.
+
+   Implemented 2026-09-08 as `--inject` on `lsst-starsub-cell-clean`
+   (module `lsst_starsub/inject.py`): each star is the cell's coadd
+   PSF core, scaled to the canonical wing's core flux (sum within 6
+   px, the stamp normalization), blended over 8-12 px into the
+   canonical wing times the wing scale; integer positions clear of
+   existing masks; the stars appended to the Gaia census; per-patch
+   plan 2 x G 8-13, 2 x 13-14, 3 x 14-15.2, 3 x 15.2-16, 4 x 16-17,
+   seed 1000 + patch.  Two extra image states carry the truth:
+   `perfect` = flat - truth (the residual under a perfect star
+   model, i.e. minus the sky-interpolation error) and `model_error`
+   = star model - truth; residual = perfect - model_error.  The
+   profile and census tables get an `injected` flag.  The real
+   stars' core flux per unit Gaia flux on patch 55 is 3.8e12
+   against the canonical core's 4.3e12 (the k_stamp/k_in ratio
+   again).  Runs in `07275-cells/inject/` (tags inj1, inj13, inj10
+   for wing scales 1, 1.3, 10; 2 min, 2.7 GB per patch);
+   `scripts/compare_inject.py` stacks injected against real.
+
+   Result (96 patches, template star model, 128 px bright
+   exclusion; 10^-3 sigma at 55, 105, 205, 305, 455 px beyond the
+   mask; G 8-13 bin, 192 injected against 362 real):
+   - truth wing (mean):        393, 242, 118, 68, 38
+   - injected residual:        +43, +7, -2, +1, +4
+   - real residual:            +5, -17, -3, -1, +3
+   - perfect-model residual:   -75, -75, -49, -29, -19 (the sky is
+     too high by 20-50 percent of the wing, out to 500 px)
+   - model - truth:            -121, -84, -46, -30, -25 (the model
+     is 30-45 percent low inside the template extent, and absent
+     beyond it: the truth wing runs to 3000 px, the template to 3x
+     the mask radius)
+   The two errors cancel to within 10 percent of the wing beyond
+   100 px: the 64 px sky passes absorb whatever wing the model
+   leaves, and the anchor-ring amplitude, fit on that flattened
+   image, is low in turn.  What survives is the collar inside the
+   exclusion zone, where the boxes cannot follow: +43 at 55 px for
+   the canonical shape.  Wing scale 1.3 scales the collar (+58);
+   wing scale 10 gives +1125 / +297 / -25, with the sky 1000 low:
+   the errors are fractional, so the amplified variant is only the
+   same story louder.  The fainter bins (13-17) show injected and
+   real residuals consistent within 1-2 sigma of ~3 x 10^-3 sigma.
+   The real stars' signature (+5 at 55, -17 at 105) differs from
+   the canonical wing's (+43, +7), so the real wings are not the
+   canonical shape at the 40 x 10^-3 sigma level in the first 100
+   px beyond the mask, or carry structure the model lacks.
+   Re-fitting the round-2 sky on the star-subtracted image
+   (`--sky-from residual`) moves the bright-bin sky error from -97
+   to -73 on four patches: the re-add is a minor part.  Control
+   runs with the canonical wing as the star model (pure
+   prediction: model error zero by construction; and shape with
+   fitted amplitudes) separate the sky interpolation from the
+   template shape: `inject/clean-forward-canonical[-fit]-inj1-*`.
+
+   Control runs (96 patches, G 8-13 bin, same five radii):
+   - canonical wing as pure prediction (model error zero, it
+     extends to 3000 px): sky error -10, -15, -1, +2, +5; injected
+     residual -14, -18, -3, +2, +4; real residual -21, -32, -6, -1,
+     +4.  The algorithm's own collar with a perfect model is -15 at
+     105 px (6 percent of the wing, the interpolation under the
+     exclusion); the real stars sit 7 +- 8 and 14 +- 6 below the
+     injected ones at 55 and 105 px, i.e. the canonical wing is
+     within ~5 percent of the real wings there.
+   - canonical shape with fitted amplitudes: injected residual +40,
+     +3, -2; sky -53, -55, -35; model -98, -60, -35: the same collar
+     as the stamp template, and the amplitude 25 percent low with
+     the shape exact.  So the collar is the sky-amplitude coupling,
+     not the template shape: the wing beyond the exclusion (and
+     beyond the template extent, 3x the mask radius) goes into the
+     64 px sky, is interpolated under the exclusion, the anchor
+     ring then reads the wing 20-25 percent low, and the final sky
+     pass absorbs what the model left.  The final image is clean
+     beyond ~150 px by construction; the collar inside is what the
+     interpolation cannot cancel.
+   Variants on 12 patches (24 injected, noisy, baseline collar
+   +56 / +12 at 55 / 105 px): sky refit on the star-subtracted
+   image with 4 rounds (`--sky-from residual --nround 4`): +13 /
+   -3, sky and model errors still 20 percent; a 400 px bright
+   exclusion: +43 / +22 and noisier.  Next iteration: the template
+   extent to the wing's full range (the canonical shape to 3000
+   px, as the pure prediction has) with the residual-sky rounds,
+   which should remove the far-wing leak into the sky as well;
+   then the real stars under that configuration, and the pure
+   prediction as the fallback (its collar is -15).
+   `inject/inject-compare-*-100patches.png`.
+
+7b. **Ideal-conditions simulation** (2026-09-09, `lsst-starsub-sim`,
+   module `lsst_starsub/sim.py`).  The question behind it: how much
+   of the limitation is the pre-processing, and would the algorithm
+   work with the processing in our hands.  One pixel grid, a smooth
+   sky (1900 nJy per visit pixel with a 2 percent gradient), the
+   real Gaia census of the patch as the stars with the canonical
+   wing as truth (Gaussian core of the visit's seeing scaled to the
+   canonical core flux, blended over 8-12 px), variance following
+   the image as on the data (26 nJy sigma at the sky level: this
+   is what keeps the moderately bright stars out of the adaptive
+   detection), saturation at 1e5 nJy, 20 visits of FWHM 0.7-1.3
+   arcsec, each fit on a 4100 px detector frame with the patch at a
+   random offset.  The calibrateImage star_background pass is
+   reproduced in full: first-pass 50 sigma detection dilated 10 px,
+   the adaptive detection at 0.2 x median sky in pixel-sigma units
+   with the per-amplifier loop of `_remeasure_star_background`
+   (without it the threshold settles at the sky level in the
+   convolved image and half the detector is one footprint: the fit
+   was off by 70 nJy), footprints grown 70 psf sigma, the weighted
+   6x6 Chebyshev on 128 px bins.  The coadd is the visit mean; the
+   response coadd R is the fit(raw) - fit(raw - stars) mean.  The
+   clean runs through the same `run_clean` as the data with the
+   truth star coadd, so `scripts/compare_inject.py` reads the
+   output (tag `sim{seed}-{state}...`); `scripts/compare_sim_trough.py`
+   stacks the trough (delivered - ideal) and what R leaves.
+   Patch 55 (307 census stars, 161 on image; 5 min with 4
+   workers): the single-visit fit error is 0.13 nJy rms; the
+   trough around G < 13 stars is -16 x 10^-3 sigma flat to 455 px
+   (the data: -15 to -20), -6.5 for G 13-14, and none + R is zero
+   within 1 x 10^-3 sigma in every bin: the response coadd
+   recovers the polynomial's imprint under ideal conditions.  The
+   cleaning shows the data's collar (+58 at 55 px on the two bright
+   stars, sky and model errors of opposite sign).  Runs in
+   `~/oh/starsub-visits/sim/` (one slurm job per patch: the sim,
+   then the template / canonical-fit / canonical / residual-sky /
+   none / restored variants on the saved sim file).
+
+   Tract result (100 patches, 372 stars G 8-13 with truth, 10^-3
+   sigma at 55, 105, 205, 305, 455 px beyond the mask):
+   - trough, delivered coadd: -32, -31, -27, -23, -16 (G 13-14: -5);
+     delivered + R: 0.0 +- 0.2 in every bin.  The response coadd
+     recovers the polynomial's imprint exactly under ideal
+     conditions; the forward model is validated.
+   - cleaning, template model (truth wing 263, 145, 64, 36, 19):
+     residual +27, +4, +1; sky error -34, -33, -25, -17, -10; model
+     error -62, -38, -30, -21, -11.  As fractions of the wing this
+     is the data's signature (sky 13-50 percent, model 24-58
+     percent, cancelling beyond 100 px, the collar inside the
+     exclusion).  With a perfect wing shape, no galaxies and a
+     smooth sky the collar is there: it is the sequential
+     sky-then-amplitude scheme, not the data.
+   - canonical shape with fitted amplitudes: the same (+24, 0);
+     pure prediction: -10, -10, -2, +1, 0 with the sky error the
+     same, i.e. the interpolation under the exclusion alone.
+   - the input state does not matter (none +26 / +3, restored +27
+     / +4): the 64 px passes absorb the trough, as on the data.
+   - the residual-sky rounds do not help (+26, +9).
+   Toy linear fits (scripts run in the session, 2026-09-09): with
+   known profiles the joint solve of amplitudes plus sky is at the
+   noise floor, ~2 x 10^-3 sigma at the mask edge, for a constant,
+   a plane, or a global cubic sky; off-image stars must be pinned
+   to the prediction (their wing on the image is a plane).  A
+   single plane over a CCD is not enough even for a smooth sky.
+   Real sky planes (`scripts/sky_smoothness.py`): after a cubic the
+   coadd has 0.23-0.43 nJy rms at 512-64 px (3-5x the noise-only
+   passes), the visits 0.75-1.4 nJy; the far wings are not it; the
+   pattern repeats on the same detector between consecutive visits
+   of one night (0.54) but not two nights apart (-0.06), so not
+   the flat; the pipeline's 128 px layer sees part of it (0.3-0.4)
+   and skyCorr anticorrelates (-0.2 to -0.3).  The flat is excluded
+   (no correlation with its structure; detector 004's two visits
+   share one flat).  By eye (`skytest/sky-*.fits`,
+   `image-boxcar64.png`, the direct masked boxcar of the image; the
+   `sky_model` planes show the sep mesh's rectangles and are not
+   the sky): the field between the stars is dense with faint
+   sources, and the "sky structure" is their light around and
+   below the 1.5 sigma segmentation, blotchy on 100-200 px at
+   +-1-2 nJy everywhere, not concentrated near the stars (rms 1.3
+   nJy within 12 px of a mask, 1.0 beyond 256 px on 044).  That
+   reading fits every test: it repeats on the co-pointed pair, it
+   survives in the coadd (0.4 nJy), and the noisier visit leaks
+   more of it past the segmentation (0.85 vs 0.5 nJy excess).  So
+   neither sky physics nor processing: undetected source light,
+   present on any image, which the joint fit's 256 px mesh handles
+   (7c).
+
+7c. **The joint fit** (2026-09-09, `lsst_starsub/joint.py`, star
+   model `joint` in both tools): amplitudes of the on-image stars
+   brighter than G 17 (canonical shape, A = 1 the prediction) and a
+   bilinear sky mesh (256 px nodes) solved together by weighted
+   least squares on 4 x 4 binned cells outside the star masks,
+   detections and bad pixels; off-image and fainter stars pinned
+   to the prediction; two passes, the second with the residual
+   re-segmented.  No exclusion zone, no interpolation.  Results
+   (10^-3 sigma at 55, 105, 205, 305, 455 px beyond the mask):
+   - simulation, 100 patches, G 8-13 (372 stars, truth wing 263,
+     145, 64, 36, 19): residual +0.9 +- 1.1, +0.7, -1.0, +0.2,
+     -0.4; sky error +1.7, +1.2, -0.5, +0.8, +0.8; model error
+     -0.7, -0.4, -0.5, -0.4, -0.2.  Every bin within 4 x 10^-3
+     sigma; the 128 px mesh is the same.  Against the sequential
+     scheme's +27 / +4 with sky and model errors of 30-60 (the
+     noise floor the toy fits predicted).
+   - real coadds with injected stars, 96 patches: injected
+     residual -3 +- 3, -1, +2, +1, +2 (was +43, +7, -2); model
+     error +6 +- 7, +6 +- 4, +6 +- 2, +5, +4 (a ~2-5 percent high
+     amplitude on the injected stars); real stars -1 +- 3, -9.5
+     +- 2.7, -3, -1, +2 (was +5, -17, -3).  The remaining -9.5 at
+     105 px on the real stars is the real wings against the
+     canonical shape, ~4 percent of the wing there, as the pure
+     prediction had found; the fainter bins are within 3.
+   2 min and 2.5 GB per patch.  Runs: `sim/clean-sim*-forward-joint[128]-*`,
+   `07275-cells/inject/clean-forward-joint-inj1-*`.
+   - on the delivered coadd (`--state none`, trough in) the joint
+     fit gives the same numbers as on the forward state: simulation
+     +0.9, +0.7, -0.9 with sky error +2.0, +1.5, -0.4 (forward: +0.9,
+     +0.7, -1.0; +1.7, +1.2, -0.5); data injected -3.3, -0.9, +1.6,
+     real -1.0, -10.7, -2.5 (forward: -3.2, -0.6, +1.7; -1.2, -9.5,
+     -3.4).  The 256 px mesh absorbs the trough (a 6x6 Chebyshev
+     per input has no structure below ~700 px).  So production
+     needs no response coadd: read the delivered coadd, one joint
+     fit, subtract.  The forward model stays as the validated
+     account of the trough.
+   - the segmentation inside the joint fit is now the
+     metadetection one (`joint.deep_segmentation`: 0.8 arcsec
+     kernel, 0.8 sigma kernel-scale threshold, minarea 4, grown 4
+     px): on visit detectors it masks twice the area of the 1.5
+     sigma per-pixel pass and removes 40 percent of the excess
+     faint-source light from the sky boxes (64 px boxcar rms 1.44
+     to 0.99 nJy on 044, 0.91 to 0.60 on 004; noise 0.53 / 0.35);
+     what remains is below even that threshold.  Runs with the tag
+     `joint-deep`.  On the injected coadds it excludes 11 percent
+     of the good pixels (the coadd is deeper) and changes little:
+     injected residual -3.6, -2.0, -0.4 (shallow -3.2, -0.6, +1.7),
+     real -4.0, -11.3, -3.8 (shallow -1.2, -9.5, -3.4), the
+     sky-error scatter 10-20 percent smaller (bright bin +-7.2 vs
+     +-8.8 at 55 px).  Kept as the default for being the
+     principled choice; the source light below it is what limits
+     the sky term on real coadds (+-3 against +-1 in the
+     source-free simulation).
+   - NERSC has no visit images (the user, 2026-09-09), so the
+     shipped canonical wing was tested for transferability: the
+     joint fit on the delivered coadds of tracts 2395 (100
+     patches, weekly collection, deep field) and 2562 (31
+     patches) with the 7275 wing, straight from the butler
+     (`lsst-starsub-cell-clean` without `--cell-file` stitches the
+     delivered coadd; 42 s per patch).  Real-star residual, G 6-13,
+     at 55, 105, 205, 305, 455 px: 7275 -1, -10, -3, -1, +2 (362
+     stars); 2395 +4, -5, -5, -1, +2 (260); 2562 -2, -9, +2, -7,
+     -3 (70).  Fainter bins within +-8, mostly a +5 to +8 at 55 px
+     for G 14-16.  The 7275 wing transfers across regions and a
+     processing run at the 10 x 10^-3 sigma level.
+   - the coadd-derived shape (`lsst_starsub/shape.py`,
+     `--joint-shape coadd`: lsst_mdet's stamp stack, inner law and
+     aureole on a WIDE_BW flattening, zero point from the stamps'
+     cores) is wired in.  Against the truth on the simulated
+     patch 55 the stamp part is right (ratio 0.8-1.0 at 20-44 px;
+     the core differs by the coadd's seeing) but the aureole is
+     not measurable from the mid-bright cloud on a coadd: with
+     lsst_mdet's joint scale-plus-aureole fit the amplitude came
+     out 3x high (a degeneracy where the aureole dominates the
+     40-260 px cloud); with the scale fixed by the core zero
+     point the slope ran to the flattest allowed (-1.5, truth
+     -2.6) because the 256 px box-flattened sky leaves ~1 nJy
+     residuals where a G 14.5 star's wing at 200 px is 0.06 nJy.
+     So the far shape must come from the bright stars after the
+     joint fit has taken the sky out: a self-calibration, the
+     stacked residual-to-model ratio of the G < 13 stars over a
+     tract in radial bins, applied as a correction to the
+     provisional shape and iterated.  Production would then be
+     two-stage per tract: joint fit with the provisional shape
+     (the shipped wing, or the coadd stamps plus lsst_mdet's
+     continuity prior), stack, correct, refit.
+   - the self-calibration (`scripts/selfcal_wing.py`): per bright
+     on-image star (G < 13, not injected) the residual profile of
+     the joint fit (the 'profiles' table, 12-900 px log bins)
+     divided by its model A F T(r); per bin a clipped weighted
+     mean over stars with the weights (npix x model^2) capped at
+     their 80th percentile and the error from the star-to-star
+     scatter (with plain inverse-variance weights one star
+     dominated each bin and tract 2562 swung by +-40 percent);
+     the correction applied only where measured to better than 3
+     percent, smoothed over 3 bins, tapered to zero inward and
+     held outward.  Results c(r) at 93, 116, 144, 178, 221, 274
+     px: 7275 (352 stars) +2.9, +3.1, +2.2, +0.4, -2.7, -0.9
+     percent (+-1.3-2.7); 2395 (257) +2.7, +3.2, +3.6, -1.3, -3.3,
+     +1.0 (+-0.6-1.0); 2562 (68) consistent within +-3-8.  The two
+     well-measured tracts agree: the canonical wing is ~3 percent
+     low at 90-150 px and ~2-3 percent high at 200-250 px; beyond
+     300 px the bright stars of a tract cannot measure it to 3
+     percent.  Wings in `selfcal/wing-selfcal-{tract}-i.fits`.
+     Applied on 7275 (96 patches, no injection, `07275-cells/selfcal/`):
+     real-star residual G 6-13 -2.4, -8.4, -4.3, +0.5, +2.5 against
+     -2.5, -8.9, -4.2, +0.8, +2.6 with the shipped wing: no change.
+     A 2-3 percent correction in r bins dominated by the brightest
+     stars does not move a d - r_mask stack that weights every
+     star equally, so the -9 at 105 px is not a single shape
+     error common to all bright stars; the broad calibration
+     measures c(r) per G bin to see whether the shape depends on
+     brightness (saturation, bleed trails, brighter-fatter in the
+     coadd).
+   - beyond ~500 px the far wing cannot be calibrated on the
+     delivered coadd at all: a 256 px mesh absorbs it, a coarser
+     mesh lets the trough (0.13 nJy at 800-1600 px, the same size
+     as a G 10 wing there) into the residual.  The far shape stays
+     the visit-derived one; the calibration corrects 90-400 px.
+   - the broad calibration (i band, 2026-09-09): a stratified
+     random sample of full DP2 tracts (6 RA x 4 Dec cells over the
+     1602 tracts with >= 90 i-band patches, one per occupied cell:
+     `broadcal/tracts-i.txt`), pass 1 the joint fit with the
+     shipped wing on every patch (`broadcal/pass1/`), the pooled
+     correction per G bin, pass 2 with the corrected wing.
+     Pass 1: the Gaia maker skips |b| < 20 deg, so 12 tracts, 1200
+     patches (10 min, 3 GB at most); 65 singular solves (a free
+     star with no cell under it, now pinned).  Pooled correction
+     from 2679 stars G < 13 at 93, 116, 144, 178, 221, 274, 341,
+     423 px: +3.2, +3.3, +3.5, -0.2, -2.8, +0.6, +2.1, -2.3
+     percent (+-0.3-1.3), the same +3 / -3 pattern as the single
+     tracts with 5x smaller errors; per G bin it is broadly the
+     same shape (G 6-10: +4.1 at 178, -4.2 at 423; G 10-11.5: +2.9
+     at 144, -2.2 at 221, +6.6 at 341; G 11.5-13: +3.2 to +4.0 at
+     93-144, -5.0 at 221), so no strong magnitude term; usable to
+     650 px.  `broadcal/wing-broadcal-i-pass1.fits`.
+   - the amplitude census of pass 1 (29,914 free stars): 3 percent
+     negative at every magnitude, star-to-star scatter 25-36
+     percent (the colour term of i-band flux against Gaia G: real,
+     expected).  Of the 73 negative bright stars 26 are pairs
+     closer than 30 px (the partner at +100), 18 are within 300 px
+     of the edge, 3 are G < 6 stars whose wing covers the patch
+     (degenerate with the mesh), most of the rest wider pairs with
+     merged masks.  Fixed by a Gaussian prior on each amplitude
+     about the prediction with width 0.3 (the colour scatter;
+     `joint.PRIOR_SIGMA`, `--joint-prior`), in the normal matrix's
+     units sky_sigma^2 / 0.3^2 (a first version in inverse units
+     did nothing): the pairs go to ~1, no negatives, isolated stars
+     move by 1-2 percent.  Pass 2 runs with it, plus a control pass
+     2b (shipped wing + prior) to separate the two effects.
+   - Pass 2 (corrected wing + prior, 1067 patches; the 40 failures
+     per pass are patches absent from DP2) does not converge: the
+     pooled residual / model comes back the same as pass 1, +3.2,
+     +3.1, +3.5 percent at 93-144 px, -1.9 at 221, although the
+     wing was raised by exactly that (verified: +3.2 percent at 93
+     px in the file the jobs used).  Pass 2b (shipped wing + prior)
+     is the same again: the prior does not change the pooled
+     ratio.  The free amplitudes absorb an r-correction; what is
+     left is orthogonal to the shape under the fit's weights.  In
+     units of the mask radius the pattern is a plateau: G 11.5-13
+     stars are +3 percent above the model from the mask edge to 2
+     mask radii (60-200 px) and zero beyond; G 10-11.5 +3.7 percent
+     in the first 15 percent of a mask radius, then -1.5, then +4
+     at 2-3 radii; G 6-10 +1.6 percent at the edge and zero
+     elsewhere.  So the residual is a magnitude-dependent shape
+     difference concentrated at 1-2 mask radii, largest for the
+     fainter bright stars (for G 12.5: 3 percent of 3 nJy at 100 px
+     = 14 x 10^-3 sigma, falling to 2 by 200 px), not a single
+     wing shape error.  A per-star r-correction cannot remove it;
+     a magnitude term in the shape (the inner wing relatively
+     shallower for fainter bright stars, as the visit stamps'
+     falling zero point k_stamp / k_in hinted) is the candidate.
+     `broadcal/wing-broadcal-i-pass{1,2,2b}.fits`.
+   - the equal-weight d - r_mask stacks of the real stars G 6-13
+     per tract (150-280 stars each, errors +-2 at 55 and 105 px,
+     +-1-1.5 beyond): all three passes within +-5 x 10^-3 sigma
+     at every radius on 8 of 9 tracts (10804 is noisier, +-8);
+     at 105 px the tract mean goes -2.2 (pass 1), -1.8 (2b), -0.6
+     (pass 2), so the broad correction helps there a little; 55
+     px is +3 to +5 on three tracts, -2 to -3 on three.  The
+     delivered-coadd joint fit with the broad-calibrated wing and
+     the prior leaves the bright stars within a few x 10^-3 sigma
+     of flat beyond the mask on a survey-wide sample; the residual
+     structure that remains is the magnitude-dependent plateau
+     above.
+   - the injected stars' model error, +6 to +8 (a ~2 percent high
+     amplitude), is the same with both segmentations; still to be
+     understood (a bias of the ring-free amplitude toward the
+     neighbours' light, or the pinned faint stars' prediction
+     being high by the k_stamp / k_in ratio and the free
+     amplitudes compensating).
+
+8. **Integration and validation.**  The per-input response is
+   computed once per visit-detector (~40 s on slurm) and stored as a
+   small coarse array; the coadd stage sums stored arrays per cell;
+   lsst-mdet reads the result.  Validate with the dual-state stack on
+   the final images in all bands (only i so far), the injection test
+   above, then metadetection on cleaned patches versus the current
+   product (star-galaxy correlations).  Check DP2 at NERSC with
+   `lsst-starsub-check-datasets`.
 
 Option 2 (pre-subtract on visits and recoadd) is no longer needed as
 a fallback: step 1 showed the trough is removable on the existing

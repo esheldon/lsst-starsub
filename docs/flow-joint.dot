@@ -1,0 +1,103 @@
+// the simplified pipeline: delivered coadd, one joint fit of the
+// star amplitudes and the sky, subtract.  No visit-level response
+// (the mesh absorbs the trough; see flow-full-forward.dot for the
+// forward-model pipeline that established that)
+// render: dot -Tpdf docs/flow-joint.dot -o flow-joint.pdf
+//         dot -Tpng -Gdpi=110 docs/flow-joint.dot -o flow-joint.png
+digraph starsub_joint {
+    rankdir = TB;
+    fontname = "Helvetica";
+    node [shape=box, style="rounded,filled", fontname="Helvetica",
+          fontsize=11, fillcolor="#f4f4f4", color="#666666"];
+    edge [fontname="Helvetica", fontsize=9, color="#444444"];
+
+    // ------------------------------------------------------------
+    subgraph cluster_inputs {
+        label = "Butler inputs";
+        style = "rounded";
+        color = "#999999";
+        fontsize = 12;
+        node [fillcolor="#e8eef8"];
+        coadd [label="deep_coadd cell coadd, as delivered\n(per-visit polynomials subtracted:\nthe trough is in; object background restored)"];
+        gaia [label="Gaia DR3 refcat\nper-tract extract, G < 19"];
+    }
+
+    // ------------------------------------------------------------
+    subgraph cluster_tmpl {
+        label = "A. Wing calibration (once per band)";
+        style = "rounded";
+        color = "#7a9a5a";
+        fontsize = 12;
+        node [fillcolor="#eaf3df"];
+        canon [label="canonical wing T(r), nJy per unit Gaia flux,\ncore included, to 3000 px:\nmedian over visits of the pooled per-visit\ntemplates (stamps 10-50 px + wing cloud)\n[lsst-starsub-visit-template]"];
+    }
+
+    // ------------------------------------------------------------
+    subgraph cluster_prep {
+        label = "B. Census and masks (per patch, lsst_mdet machinery)";
+        style = "rounded";
+        color = "#5a7aa8";
+        fontsize = 12;
+        node [fillcolor="#e2e9f4"];
+        census [label="Gaia census: on-image stars and the\noff-image intruders within 210 px;\nmask circles by G (20-450 px),\nSAT / INTRP components"];
+        pinned [label="pinned stars: off the image or fainter\nthan G 17, at the prediction (A = 1),\nrendered and subtracted first\n(their wing on the image is a plane)"];
+        census -> pinned;
+    }
+
+    // ------------------------------------------------------------
+    subgraph cluster_joint {
+        label = "C. Joint fit (per patch, lsst_starsub.joint)";
+        style = "rounded";
+        color = "#8a5a9a";
+        fontsize = 12;
+        node [fillcolor="#efe3f3"];
+        cells [label="4 x 4 binned cells outside the star masks,\nthe bad pixels and the detections;\nweight = pixels per cell"];
+        design [label="columns: one per free star (canonical shape,\nA = 1 the prediction, windowed to where\nit falls below 0.005 nJy) + bilinear sky\nmesh, 256 px nodes"];
+        solve [label="weighted least squares:\nimage = sum A_k F_k T(r - r_k) + S(x)\n(sparse normal equations, ~200 + N_star unknowns)"];
+        seg [label="pass 2: re-segment the residual with the\nmetadetection settings (0.8 arcsec kernel,\n0.8 sigma, minarea 4, grown 4 px), re-solve"];
+        cells -> design -> solve -> seg;
+        seg -> solve [label="once", constraint=false];
+    }
+
+    // ------------------------------------------------------------
+    subgraph cluster_out {
+        label = "D. Output (per patch)";
+        style = "rounded";
+        color = "#b0743a";
+        fontsize = 12;
+        node [fillcolor="#f8ecdc"];
+        model [label="star model: A_k F_k T(r) for every\ncensus star, to 3000 px\nsky: the mesh at full resolution"];
+        resid [label="residual = coadd - sky - star model:\nstar-free, sky-flat coadd\n[lsst-starsub-cell-clean --star-model joint]"];
+        model -> resid;
+    }
+
+    // ------------------------------------------------------------
+    subgraph cluster_valid {
+        label = "Validation";
+        style = "rounded,dashed";
+        color = "#999999";
+        fontsize = 12;
+        node [fillcolor="#ffffff", style="rounded,filled,dashed"];
+        v1 [label="ideal simulation (lsst-starsub-sim):\nresidual, sky error and model error\nwithin 2 x 10^-3 sigma at the mask edge"];
+        v2 [label="injection into the real coadds:\ninjected stars within 3 x 10^-3 sigma;\nreal stars -1 / -10 / -3 at 55 / 105 / 205 px\n(the wing shape, ~4 percent at 100 px)"];
+        v3 [label="delivered vs forward input state:\nidentical (the mesh absorbs the trough)"];
+        v4 [label="metadetection on cleaned patches\nvs the current product"];
+        v1 -> v2 -> v3 -> v4 [style=invis];
+    }
+
+    // ------------------------------------------------------------
+    // the data flow
+    coadd -> census;
+    gaia -> census;
+    canon -> pinned;
+    canon -> design;
+    coadd -> cells [label="none state"];
+    pinned -> cells [label="subtracted"];
+    census -> cells [label="masks"];
+    solve -> model;
+    coadd -> resid;
+    resid -> v1;
+    resid -> v2;
+    resid -> v3;
+    resid -> v4;
+}

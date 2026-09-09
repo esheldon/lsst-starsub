@@ -73,7 +73,7 @@ def radial_template(tmpl):
 
 
 def render_wing_image(shape, x, y, gmag, rt, k_in, calib,
-                      gmax=RENDER_GMAX, eps=RENDER_EPS):
+                      gmax=RENDER_GMAX, eps=RENDER_EPS, amps=None):
     """
     the summed star image (ADU) on a detector from the radial
     template
@@ -94,6 +94,8 @@ def render_wing_image(shape, x, y, gmag, rt, k_in, calib,
     eps: float, optional
         Each star's window ends where its wing falls below this
         (ADU)
+    amps: array, optional
+        Per-star amplitude factors (1 = the prediction)
 
     Returns
     -------
@@ -103,10 +105,12 @@ def render_wing_image(shape, x, y, gmag, rt, k_in, calib,
     r, T = rt
     image = np.zeros((ny, nx), dtype='f4')
     n = 0
-    for xk, yk, gk in zip(x, y, gmag):
-        if not gk < gmax:
+    if amps is None:
+        amps = np.ones(len(x))
+    for xk, yk, gk, ak in zip(x, y, gmag, amps):
+        if not gk < gmax or not ak > 0:
             continue
-        amp = k_in * 10.0 ** (-0.4 * gk) / calib
+        amp = ak * k_in * 10.0 ** (-0.4 * gk) / calib
         prof = amp * T
         below = np.flatnonzero(prof < eps)
         rmax = float(r[below[0]]) if below.size else float(r[-1])

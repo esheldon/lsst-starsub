@@ -20,6 +20,8 @@ lsst-starsub-forward-check = "lsst_starsub.cli.forward_check:main"
 lsst-starsub-visit-template = "lsst_starsub.cli.visit_template:main"
 lsst-starsub-make-slurm-template = "lsst_starsub.cli.make_slurm_template:main"
 lsst-starsub-cell-forward = "lsst_starsub.cli.cell_forward:main"
+lsst-starsub-cell-clean = "lsst_starsub.cli.cell_clean:main"
+lsst-starsub-sim = "lsst_starsub.cli.sim:main"
 
 [tool.setuptools.packages.find]
 include = ["lsst_starsub*"]
