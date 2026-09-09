@@ -37,6 +37,8 @@ STAR_BG_GROW_SIGMA = 70.0
 PSF_DET_DILATE = 10
 SIMPLE_PSF_FWHM = 4.0
 SIMPLE_PSF_WIDTH = 11
+PSF_DET_THRESHOLD = 10.0
+PSF_DET_MULTIPLIER = 5.0
 DETECTED_PLANES = ['DETECTED', 'DETECTED_NEGATIVE']
 
 
@@ -59,13 +61,19 @@ def load_raw_exposure(butler, visit, detector):
     calib = float(exp.getPhotoCalib().getCalibrationMean())
     md = butler.get('calibrateImage_metadata', dataId=did).to_dict()
     top = md['calibrateImage']
+    # DP2's metadata lacks the psf-detection entries; the config
+    # values (psf_detection thresholdValue 10, multiplier 5) were
+    # what the weekly recorded on every detector checked
     meta = dict(
         adaptive_threshold=float(top['adaptive_threshold_value']),
-        psf_threshold=float(top['psf_adaptive_threshold_value']),
-        psf_multiplier=float(
-            top['psf_adaptive_include_threshold_multiplier']
-        ),
-        detected_fraction=float(top['detected_mask_fraction']),
+        psf_threshold=float(top.get('psf_adaptive_threshold_value',
+                                    PSF_DET_THRESHOLD)),
+        psf_multiplier=float(top.get(
+            'psf_adaptive_include_threshold_multiplier',
+            PSF_DET_MULTIPLIER,
+        )),
+        detected_fraction=float(top.get('detected_mask_fraction',
+                                        float('nan'))),
     )
     raw = exp.clone()
     raw.image.array[:, :] += bglist.getImage().array

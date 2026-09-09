@@ -38,6 +38,12 @@ def get_args():
     parser.add_argument('--collection', default=VISIT_COLLECTION)
     parser.add_argument('--nproc', type=int, default=1)
     parser.add_argument('--gsub', type=float, default=GSUB)
+    parser.add_argument(
+        '--canonical',
+        help='a canonical wing file (one wing for every visit) '
+             'instead of the per-visit templates; output named '
+             'forward-canonical-...',
+    )
     return parser.parse_args()
 
 
@@ -76,6 +82,7 @@ def main():
     print('building the response coadd')
     cache = ResponseCache(
         butler, args.templates, args.visit_gaia_dir, args.band,
+        canonical=args.canonical,
     )
     rcoadd, rlevel, wsum, count = polynomial_cell_coadd(
         butler, mcoadd, repo=args.repo, collection=args.collection,
@@ -119,10 +126,12 @@ def main():
         tract=args.tract, patch=args.patch, band=args.band,
         collection=args.collection, gsub=args.gsub,
         sky_sigma=vexp.sky_sigma, templates=args.templates,
+        canonical=args.canonical or '',
     )
+    stem = 'forward' if args.canonical is None else 'forward-canonical'
     fname = os.path.join(
         args.outdir,
-        f'forward-{args.tract:05d}-{args.patch:02d}-{args.band}.fits',
+        f'{stem}-{args.tract:05d}-{args.patch:02d}-{args.band}.fits',
     )
     print('writing:', fname)
     edges_t = np.zeros(1, dtype=[('edges', 'f8', dedges.size)])

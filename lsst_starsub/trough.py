@@ -142,11 +142,16 @@ class ResponseCache(PolynomialCache):
     """
 
     def __init__(self, butler, template_dir, gaia_dir, band,
-                 factor=COARSE_FACTOR, order=SMOOTH_ORDER):
+                 factor=COARSE_FACTOR, order=SMOOTH_ORDER,
+                 canonical=None):
         super().__init__(butler, factor=factor, order=order)
         self.template_dir = template_dir
         self.gaia_dir = gaia_dir
         self.band = band
+        # a canonical wing file (template.write_canonical_wing):
+        # the same physical wing, nJy per unit Gaia flux, for every
+        # visit, in place of the per-visit templates
+        self.canonical = canonical
         self._templates = {}
         self._gaia = {}
         self.stats = {}
@@ -155,12 +160,18 @@ class ResponseCache(PolynomialCache):
         return ResponseCache(
             butler, self.template_dir, self.gaia_dir, self.band,
             factor=self.factor, order=self.order,
+            canonical=self.canonical,
         )
 
     def template(self, visit):
-        from .template import read_template_file
+        from .template import read_canonical_wing, read_template_file
 
         visit = int(visit)
+        if self.canonical is not None:
+            if 'canonical' not in self._templates:
+                r, T = read_canonical_wing(self.canonical)
+                self._templates['canonical'] = ((r, T), dict(k_in=1.0))
+            return self._templates['canonical']
         if visit not in self._templates:
             t = read_template_file(
                 template_path(self.template_dir, visit, self.band),

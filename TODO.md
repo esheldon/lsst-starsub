@@ -175,6 +175,119 @@ template job per detector of the 28 visits, `extracts-{visit}/`).
 - Only patches 55 and 56 of the tract are covered entirely by the 28
   visits; the tract has 65 visits.  The forward model on more patches
   needs the other 37 visits' templates (about 6700 more jobs).
+- Coadd level, all 100 patches (372 stars at G < 13, coadd sigma
+  ~6.6 nJy): the dual-state pattern of the deep field.  `none` at
+  the global reference -10.7, -15.1, -7.6 x 10^-3 sigma at 205, 305,
+  455 px (about -0.1 nJy); `restored` +13.7, +8.0, +2.6; the
+  `object` state's collar -62 at 55 px.  Stacks in
+  `07275-cells/stack-cells-i-{global,local}.*`.
+- Templates of all 28 visits (4,945 detector jobs; the profile
+  neighbor exclusion had to be made local, a dense-field O(N^2)
+  cost that took jobs from 1 to over 15 minutes; 30 s after).
+  Table in `templates/params-07275-55.txt`, plot
+  `params-vs-fwhm-07275-55.png`.  Findings:
+  - the inner-law amplitude ln_a rises with seeing, from -0.6 at
+    0.77" to ~2 at 1.45", about twice as steep as the coadd
+    canonical relation (0.92 per arcsec); the stack zero point
+    k_stamp falls with seeing as the 6 px core loses flux.
+  - the physical wing, k_in x T(r) in nJy per unit Gaia flux, is
+    stable across visits: 1.1-1.5 x 10^4 at 300 px (one outlier at
+    5 x 10^3), 2.1-3.5 x 10^5 at 100 px, a factor 3 scatter at
+    1000 px where it is poorly constrained.  The fitted components
+    trade off against each other; the sum is what matters.
+  - k_stamp / k_in is 0.7-1.0 (the direct stamp zero point is ~15
+    percent below the continuity fit's); two poor-seeing visits
+    (2025081600397 at 1.44", 2025090200262) hit the slope grid
+    bounds and need a more robust fit.
+- Forward model on patches 55 and 56 (`lsst-starsub-cell-forward`,
+  `lsst_starsub.trough`: per input the census wings rendered from
+  the visit template, the star_background refit, response =
+  fit(raw) - fit(raw - stars), order-2 removed, coadded per cell
+  with the input weights; ~15 s per input, 4.5 min per patch with
+  4 workers).  Compared as images, no pixel noise
+  (`forward/forward-vs-restored-55-56.png`): what the restoration
+  adds (restored - none) against the template response coadd
+  (forward - none), mean over stars in nJy:
+  - G 6-11 (2 stars): 0.99 vs 0.96 at 55 px beyond the mask, 0.67
+    vs 0.73 at 205, 0.31 vs 0.38 at 455.  The forward model
+    reproduces the polynomials' star response to 10-20 percent
+    with no free parameter (the zero point is the template's).
+  - G 11-13 (9 stars): 0.31 vs 0.30 near the mask, 0.15 vs 0.25 at
+    455 px.
+  - fainter: both are at or below the per-cell offset floor of the
+    polynomial coadd (~0.4 nJy rms at 22 inputs per cell, ~0.1 nJy
+    on the mean over 10 stars), so nothing can be said; the noisy
+    profile stacks agree within errors.
+  Statistics need the whole tract: templates for its other 37
+  visits (about 6,700 one-minute jobs), then the forward model on
+  all 100 patches.
+- One wing per band suffices for the forward model.  A canonical
+  wing (`templates/canonical-wing-07275-i.fits`: the median over
+  the 28 visits of k_in T_v(r), nJy per unit Gaia flux; visit
+  scatter 14, 10, 8 percent at 50, 100, 300 px, 46 percent at
+  1000 px) used for every input reproduces the per-visit forward
+  model to 2 percent at every radius and magnitude on patches 55
+  and 56 (`forward/forward-compare-55-56.png`).  So production needs
+  no per-visit image processing for the trough model: the
+  polynomial responses depend on the mask and the wing, and the
+  wing is the same to the precision that matters.
+- Tract-wide forward model with the canonical wing (100 single-core
+  jobs, ~40 s per input on slurm, 22 of them past the 1 h limit and
+  resubmitted with 3 h; 75 patches, 277 stars at G < 13 in the
+  first pass).  Profile stacks at the global reference, 10^-3
+  sigma at 205, 305, 455 px:
+  - G 6-13: none -10.2, -12.8, -7.9; restored +22.0, +14.9, +5.9;
+    forward +22.9, +13.2, +8.9 (errors 3-6).  The forward model
+    reproduces the restoration within 1 sigma at every radius.
+  - G 13-14: restored -5.0, -2.8, -11.1; forward +5.0, +4.7, -3.8
+    (errors 4-6): the forward model sits ~10 x 10^-3 sigma (0.07
+    nJy) above the restoration, 1.5 sigma, the same sense as the
+    55/56 image comparison.
+  - fainter bins: all three states agree within errors.
+  `07275-cells/stack-forward-canonical-i-{global,local}.*`.
+- Noise-free image comparison over the 75 patches
+  (`forward/forward-compare-75patches.png`), restored - none against
+  the canonical forward model, mean over stars in nJy at 55, 205,
+  455 px beyond the mask:
+  - G 6-11 (55 stars): 1.13, 0.75, 0.16 vs 1.26, 0.86, 0.21: the
+    model is 12-15 percent high near the star, 35 percent at 455 px.
+  - G 11-13 (222): 0.21, 0.18, 0.11 vs 0.14, 0.12, 0.07: 30-35
+    percent low.
+  - G 13-14 (282): 0.01, 0.01, -0.01 vs 0.05, 0.04, 0.02.
+  - fainter: both within +-0.04 of zero.
+  Each is a 2-2.5 sigma difference against the per-cell offset
+  floor (0.4 nJy per cell over sqrt(n) stars), with opposite signs
+  in the two bright bins, so a magnitude-dependent residual of
+  order 30 percent of the bump, about 0.05 nJy (0.01 sigma) at
+  200-450 px.  Suspects: the far wing beyond 500 px (46 percent
+  visit scatter, the bright stars' bumps are driven by the wing
+  outside their ~200 px masks) and the rebuilt mask size for stars
+  near the adaptive detection threshold (G 11-13).
+- The large-scale negative tail of the stacks is the polynomials'
+  ringing.  Mean image level against distance to the nearest G < 13
+  star over 30 patches (patch median removed, 10^-3 sigma): `none`
+  has the trough at 300-600 px (-24, -21) and is back to zero by
+  800 px; `restored` and `forward` are positive to 500 px, zero at
+  500-800 px, then a negative ring of -15 to -20 at 800-1600 px
+  (restored -15.0, -16.2, -16.7; forward -20.2, -19.2, -18.5, errors
+  6-10).  A 6x6 Chebyshev responding to a bump overshoots negative
+  beyond it; the stored polynomials carry that ring and the forward
+  model reproduces it.  It is a smooth 1000 px feature, exactly
+  what the step-3 sky refit removes after the star model comes off;
+  it also means the local reference at 500-600 px beyond the mask
+  sits inside the ring for bright stars.
+- Zero point: within the template stars the stamp zero point (core
+  amplitude over Gaia flux) falls with brightness, 4.16 to 3.85 x
+  10^12 from G 17-17.5 to 16-16.5 on the 0.77" visit (8 percent),
+  an aperture loss of the 6 px core for brighter stars (brighter-
+  fatter), so the median stamp value is biased low and the
+  continuity fit's k_in, tied to the G < 15.5 wing stars, is the
+  right scale for the wings; the bright-star forward match above
+  used it.  The poor-seeing visit 2025081600397 (1.44") is not a
+  failed fit: its stack is a single -3.5 power law to 200 px with
+  no separate aureole, so the two-component model degenerates
+  (aureole slope at its bound, tiny amplitude) while the physical
+  wing, 1.26 x 10^4 at 300 px, is normal.
 
 ## Steps
 

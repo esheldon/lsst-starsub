@@ -666,3 +666,46 @@ def plot_template(png, pooled):
     fig.savefig(png, dpi=110)
     plt.close(fig)
     print('wrote', png)
+
+
+def canonical_wing(files, rmax=3000.0):
+    """
+    the canonical physical wing of a band: the median over visit
+    template files of k_in T_v(r), the wing in nJy per unit Gaia
+    flux, on a common radial grid.  No per-visit information
+    remains; the test of whether one wing per band suffices
+
+    Returns
+    -------
+    r, T (nJy per unit flux), and the per-visit curves (nvisit, nr)
+    """
+    from .trough import radial_template
+
+    curves = []
+    r0 = None
+    for f in files:
+        t = read_template_file(f)
+        r, T = radial_template(t)
+        if r0 is None:
+            r0 = r
+        curves.append(t['params']['k_in'] * np.interp(r0, r, T))
+    curves = np.array(curves)
+    return r0, np.median(curves, axis=0), curves
+
+
+def write_canonical_wing(fname, r, T, band, nvisit):
+    import rustfits
+
+    tab = np.zeros(r.size, dtype=[('r', 'f8'), ('T', 'f8')])
+    tab['r'], tab['T'] = r, T
+    with rustfits.FITS(fname, 'w+') as fits:
+        fits.write_table(tab, extname='wing',
+                         header={'band': band, 'nvisit': int(nvisit)})
+
+
+def read_canonical_wing(fname):
+    import rustfits
+
+    with rustfits.FITS(fname) as fits:
+        tab = fits['wing'].read()
+    return tab['r'].astype('f8'), tab['T'].astype('f8')
