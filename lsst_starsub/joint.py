@@ -38,7 +38,9 @@ PRIOR_SIGMA = 0.3   # the amplitude prior about the prediction (A = 1):
 
 def deep_segmentation(image, good, sig, grow=SEG_GROW):
     """
-    the metadetection detection settings (lsst_mdet.detect: the
+    Segment the sources with the metadetection detection settings.
+
+    The metadetection detection settings (lsst_mdet.detect: the
     0.8 arcsec Gaussian kernel, threshold 0.8 in kernel-scale
     noise, minarea 4) as a mask of the sources, grown by `grow`
     px; twice the area of the 1.5 sigma per-pixel segmentation
@@ -67,7 +69,9 @@ def deep_segmentation(image, good, sig, grow=SEG_GROW):
 
 def binned_cells(image, ok, b=BIN):
     """
-    the means of the ok pixels per b x b cell, the ok counts and
+    Bin an image into b x b cells over the usable pixels.
+
+    The means of the ok pixels per b x b cell, the ok counts and
     the cell centers (pixel coordinates)
     """
     ny, nx = image.shape
@@ -82,7 +86,9 @@ def binned_cells(image, ok, b=BIN):
 
 def mesh_columns(cy, cx, shape, spacing):
     """
-    bilinear hat functions on a node grid covering the image, as
+    Build the bilinear sky-mesh columns at the cell centres.
+
+    Bilinear hat functions on a node grid covering the image, as
     a sparse (ncell, nnode) matrix evaluated at the cell centers
     """
     from scipy import sparse
@@ -112,7 +118,11 @@ def mesh_columns(cy, cx, shape, spacing):
 
 
 def render_mesh(nodes, values, shape):
-    """the bilinear mesh at full resolution"""
+    """
+    Render the bilinear mesh at full resolution.
+
+    The bilinear mesh at full resolution
+    """
     xn, yn = nodes
     vals = np.asarray(values, dtype='f8').reshape(yn.size, xn.size)
     ny, nx = shape
@@ -134,7 +144,9 @@ def render_mesh(nodes, values, shape):
 
 def star_column(cy, cx, x, y, G, canonical, b=BIN, eps=EPS):
     """
-    the star's wing at the cell centers within its window:
+    Evaluate one star's wing at the cell centres of its window.
+
+    The star's wing at the cell centers within its window:
     (cell indices, values) with A = 1 the prediction; canonical
     is (r, T) or a WingModel (per-star shape)
     """
@@ -165,6 +177,8 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
               gfit=GFIT, b=BIN, npass=NPASS, eps=EPS, variance=None,
               prior_sigma=PRIOR_SIGMA, verbose=True):
     """
+    Fit the star amplitudes and the sky mesh together.
+
     Parameters
     ----------
     image: array (nJy)

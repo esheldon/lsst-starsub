@@ -44,7 +44,9 @@ DEFAULTS = dict(
 
 def sky_image(shape, level, gradient, rng):
     """
-    a smooth sky: the level with a random-direction linear
+    Make a smooth sky with a random linear gradient.
+
+    A smooth sky: the level with a random-direction linear
     gradient of the given fractional amplitude across the image
     """
     ny, nx = shape
@@ -56,12 +58,17 @@ def sky_image(shape, level, gradient, rng):
 
 
 def gaussian_core(rr, sigma):
+    """
+    Evaluate a unit Gaussian core at the given radii.
+    """
     return np.exp(-0.5 * (rr / sigma) ** 2) / (2 * np.pi * sigma ** 2)
 
 
 def core_factor_gaussian(sigma, canonical):
     """
-    the flux of a unit Gaussian core within CORE_R, and the
+    Scale a Gaussian core to the canonical core flux.
+
+    The flux of a unit Gaussian core within CORE_R, and the
     canonical wing's, so the core can be scaled to match
     """
     r, T = canonical
@@ -76,7 +83,9 @@ def core_factor_gaussian(sigma, canonical):
 def render_stars(shape, x, y, G, amp, canonical, fwhm_px, eps=DEFAULTS['eps'],
                  gmax=DEFAULTS['render_gmax']):
     """
-    the summed star image (nJy) for one visit
+    Render the star image of one visit.
+
+    The summed star image (nJy) for one visit
 
     Parameters
     ----------
@@ -124,7 +133,11 @@ AMP_GRID = (2, 8)   # amplifier layout (rows, columns) of the detector
 
 
 def amp_fractions(detected, grid=AMP_GRID):
-    """the detected fraction per amplifier region"""
+    """
+    Compute the detected fraction per amplifier region.
+
+    The detected fraction per amplifier region
+    """
     ny, nx = detected.shape
     fr = []
     for i in range(grid[0]):
@@ -137,7 +150,9 @@ def amp_fractions(detected, grid=AMP_GRID):
 
 def adaptive_detection(exp, dilated, det, thresh, grow, max_iter=40):
     """
-    calibrateImage's adaptive star-background detection loop
+    Run calibrateImage's adaptive star-background detection loop.
+
+    CalibrateImage's adaptive star-background detection loop
     (_remeasure_star_background): detect at thresh (pixel_stdev
     units) with the footprints grown, OR in the dilated first-pass
     mask, and adjust the threshold until the detected fraction
@@ -189,7 +204,9 @@ def adaptive_detection(exp, dilated, det, thresh, grow, max_iter=40):
 
 def dm_background_pass(raw, var, satmask, fwhm_px, star_image=None):
     """
-    the calibrateImage star_background pass on one visit: the
+    Run the calibrateImage star_background pass on one visit.
+
+    The calibrateImage star_background pass on one visit: the
     first-pass 50 sigma detection on a 128 px sep-flattened
     image (grown 2.4 sigma, dilated 10 px), the adaptive
     detection on the raw sky image starting at 0.2 x median sky in
@@ -255,7 +272,9 @@ def dm_background_pass(raw, var, satmask, fwhm_px, star_image=None):
 
 def simulate_visit(k, shape, x, y, G, amp, canonical, cfg, seed):
     """
-    one visit: sky, stars, noise, saturation, the background pass
+    Simulate one visit through the background pass.
+
+    One visit: sky, stars, noise, saturation, the background pass
     with the response to the true stars
 
     Returns
@@ -311,7 +330,9 @@ def _worker(args):
 
 def simulate_coadd(shape, x, y, G, amp, canonical, cfg, seed=0, nproc=1):
     """
-    the visits and their equal-weight coadds
+    Simulate the visits and their equal-weight coadds.
+
+    The visits and their equal-weight coadds
 
     Returns
     -------

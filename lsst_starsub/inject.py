@@ -44,6 +44,8 @@ DEFAULT_PLAN = [
 
 def parse_plan(text):
     """
+    Parse an injection plan string.
+
     'glo-ghi:n,glo-ghi:n' -> [((glo, ghi), n), ...]
     """
     plan = []
@@ -56,7 +58,9 @@ def parse_plan(text):
 
 def draw_positions(rng, plan, dstar, shape):
     """
-    random integer positions and magnitudes: the center clear
+    Draw random positions and magnitudes for the injected stars.
+
+    Random integer positions and magnitudes: the center clear
     of existing masks, the star's mask circle plus EDGE_EXTRA
     inside the image
 
@@ -92,7 +96,9 @@ def draw_positions(rng, plan, dstar, shape):
 
 def psf_cube(mcoadd):
     """
-    the per-cell psf images of the cell coadd
+    Collect the per-cell psf images of a cell coadd.
+
+    The per-cell psf images of the cell coadd
 
     Returns
     -------
@@ -113,7 +119,9 @@ def psf_cube(mcoadd):
 
 def core_factor(psf, canonical):
     """
-    the factor scaling the unit-sum psf so its sum within CORE_R
+    Scale a unit-sum psf to the canonical core flux.
+
+    The factor scaling the unit-sum psf so its sum within CORE_R
     equals the canonical wing's
     """
     r, T = canonical
@@ -131,7 +139,9 @@ def core_factor(psf, canonical):
 def render_injected(shape, x, y, G, canonical, cube, origin, cell_size,
                     bbox_start, wing_scale=1.0, eps=EPS):
     """
-    the summed injected-star image (nJy) and, per star, the
+    Render the injected stars.
+
+    The summed injected-star image (nJy) and, per star, the
     canonical core flux and the truth parameters
 
     Parameters
@@ -189,7 +199,9 @@ def render_injected(shape, x, y, G, canonical, cube, origin, cell_size,
 
 def census_rows(x, y, wcs, bbox_start, G, gaia_dtype):
     """
-    the injected stars as Gaia rows (proper motion 0, ruwe 1)
+    Build Gaia census rows for the injected stars.
+
+    The injected stars as Gaia rows (proper motion 0, ruwe 1)
     """
     ra, dec = wcs.pixelToSkyArray(
         (x + bbox_start[0]).astype('f8'), (y + bbox_start[1]).astype('f8'),
@@ -204,6 +216,9 @@ def census_rows(x, y, wcs, bbox_start, G, gaia_dtype):
 
 
 def injected_table(x, y, G, ra, dec, cores, wing_scale):
+    """
+    Build the injected-star truth table.
+    """
     t = np.zeros(x.size, dtype=[
         ('x', 'f8'), ('y', 'f8'), ('G', 'f4'), ('ra', 'f8'), ('dec', 'f8'),
         ('core_flux', 'f8'), ('wing_scale', 'f8'),
@@ -217,7 +232,9 @@ def injected_table(x, y, G, ra, dec, cores, wing_scale):
 
 def flag_injected(table, inj, tol=0.5):
     """
-    add an 'injected' column (1 where the row's x, y match an
+    Add an injected flag column to a table.
+
+    Add an 'injected' column (1 where the row's x, y match an
     injected star) to a profile or census table
     """
     from numpy.lib import recfunctions as rfn
@@ -234,7 +251,9 @@ def flag_injected(table, inj, tol=0.5):
 def measure_core_zero_point(image, good, stars, sky_sigma, glo=15.5,
                             ghi=17.0):
     """
-    the real stars' core flux per unit Gaia flux (sum within
+    Measure the real stars' core flux per unit Gaia flux.
+
+    The real stars' core flux per unit Gaia flux (sum within
     CORE_R above the local median), for comparison with the
     canonical core: prints and returns the median
     """

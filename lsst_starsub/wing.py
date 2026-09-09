@@ -9,6 +9,9 @@ import numpy as np
 
 
 class WingModel(object):
+    """
+    The radial wing shape shared by every star.
+    """
     def __init__(self, r, T):
         self.r = np.asarray(r, dtype='f8')
         self.T = np.asarray(T, dtype='f8')
@@ -18,11 +21,18 @@ class WingModel(object):
         return iter((self.r, self.T))
 
     def profile(self, G):
-        """(r, T) for a star of magnitude G: the same for all"""
+        """
+        Return (r, T) for a star of magnitude G.
+
+        (r, T) for a star of magnitude G: the same for all
+        """
         return self.r, self.T
 
 
 def read_wing_model(fname):
+    """
+    Read a wing file into a WingModel.
+    """
     from .template import read_canonical_wing
 
     r, T = read_canonical_wing(fname)

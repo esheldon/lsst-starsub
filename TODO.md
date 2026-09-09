@@ -854,6 +854,24 @@ template job per detector of the 28 visits, `extracts-{visit}/`).
    evaluation (0.06 s, identical to 1e-15).  So about 7 s per
    patch per band added to a metadetection run.
 
+7f. **Wiring into lsst_mdet** (2026-09-09).  Direction: lsst_mdet
+   calls lsst_starsub as a library; the old `lsst_mdet.starsub`
+   route stays untouched as the reference.  `lsst_starsub/starsub.py`
+   provides `handle_stars_joint(deep_coadd, wcs, gaia, wing, gsub)`
+   with the contract of `lsst_mdet.starsub.handle_stars` (restores
+   the stored object background, joint fit, subtracts the mesh and
+   the stars in place, returns starmask / star_table / dstar) and
+   `load_wing(path)`.  In lsst_mdet: `cells.load_coadds_butler` and
+   `cli/getimages.prepare_band_stars` take `starsub_method`
+   ('template' default, 'joint') and a `wing_pattern` with a
+   `{band}` placeholder; `lsst-mdet-process-cells` / the node driver
+   and `lsst-mdet-getimages` expose `--starsub-method` and
+   `--wing-pattern`; the provenance records both.  lsst_mdet must be
+   reinstalled (`pip install .`) for the options to exist.  Only the
+   i-band wing is calibrated; the test links r and z to it (the
+   shape per band is a known gap: run the per-visit template
+   pooling for the other bands at S3DF).
+
 8. **Integration and validation.**  The per-input response is
    computed once per visit-detector (~40 s on slurm) and stored as a
    small coarse array; the coadd stage sums stored arrays per cell;

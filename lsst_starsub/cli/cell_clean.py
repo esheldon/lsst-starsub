@@ -36,6 +36,9 @@ STATE = 'none'
 
 
 def get_args():
+    """
+    Parse the command line.
+    """
     import argparse
     from ..visit import VISIT_COLLECTION, VISIT_REPO
     from lsst_mdet.starsub import GSUB
@@ -86,6 +89,9 @@ def get_args():
 
 
 def main():
+    """
+    Clean one patch coadd.
+    """
     from lsst_mdet.gaia import GMAX, gaia_pixel_positions, read_gaia_file
     from lsst_mdet.patchfiles import SimpleBox
     from lsst_mdet.wcs import ButlerWcs

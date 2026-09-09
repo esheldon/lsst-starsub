@@ -13,7 +13,9 @@ def run_clean(vexp, gaia, tbox, state_name, gsub, nround, grow_bright,
               star_model, canonical, truth=None, inj=None,
               joint_spacing=None, joint_prior=None):
     """
-    run handle_stars_visit on vexp (in place) and measure the
+    Subtract the stars and the sky of a patch and measure the profiles.
+
+    Run handle_stars_visit on vexp (in place) and measure the
     profiles of the states around the census stars
 
     Parameters
@@ -93,7 +95,9 @@ def run_clean(vexp, gaia, tbox, state_name, gsub, nround, grow_bright,
 
 def write_clean_file(stem, out, meta, no_images=False, extra_tables=None):
     """
-    write the clean output file (and the summary png): the image
+    Write the clean output file and its summary png.
+
+    Write the clean output file (and the summary png): the image
     states, sky, star model, star mask and truth when kept, the
     census, the profile tables and their edges, the meta table
     """
@@ -147,6 +151,9 @@ def write_clean_file(stem, out, meta, no_images=False, extra_tables=None):
 
 
 def clean_tag(state, star_model, inject_tag=None, joint_spacing=None):
+    """
+    Build the output-name tag of a clean run.
+    """
     tag = state if star_model == 'template' else f'{state}-{star_model}'
     if star_model == 'joint' and joint_spacing is not None:
         tag += f'{int(joint_spacing)}'
@@ -156,6 +163,9 @@ def clean_tag(state, star_model, inject_tag=None, joint_spacing=None):
 
 
 def clean_stem(outdir, tag, tract, patch, band, prefix='clean'):
+    """
+    Build the output path stem of a clean run.
+    """
     return os.path.join(
         outdir, f'{prefix}-{tag}-{tract:05d}-{patch:02d}-{band}',
     )

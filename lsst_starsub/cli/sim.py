@@ -19,6 +19,9 @@ import numpy as np
 
 
 def get_args():
+    """
+    Parse the command line.
+    """
     import argparse
     from ..sim import DEFAULTS
     from ..visit import VISIT_COLLECTION, VISIT_REPO
@@ -59,7 +62,11 @@ def get_args():
 
 
 def sim_geometry(butler, tract, patch, margin=150):
-    """the tract wcs and the cell-coadd-sized patch box"""
+    """
+    Get the tract wcs and the cell-coadd-sized patch box.
+
+    The tract wcs and the cell-coadd-sized patch box
+    """
     from lsst_mdet.patchfiles import SimpleBox
     from lsst_mdet.wcs import ButlerWcs
     from ..visit import SKYMAP
@@ -73,6 +80,9 @@ def sim_geometry(butler, tract, patch, margin=150):
 
 
 def write_sim_file(fname, sim, truth_table, cfg, meta):
+    """
+    Write the simulation file.
+    """
     import rustfits
     from ..io import _meta_table
 
@@ -88,6 +98,9 @@ def write_sim_file(fname, sim, truth_table, cfg, meta):
 
 
 def read_sim_file(fname):
+    """
+    Read a simulation file.
+    """
     import rustfits
 
     sim = {}
@@ -101,6 +114,9 @@ def read_sim_file(fname):
 
 
 def main():
+    """
+    Simulate a patch and clean it.
+    """
     from lsst_mdet.defaults import DM_SAT
     from lsst_mdet.gaia import GMAX, gaia_pixel_positions, read_gaia_file
     from ..clean import clean_stem, clean_tag, run_clean, write_clean_file
