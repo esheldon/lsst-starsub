@@ -155,8 +155,8 @@ def star_column(cy, cx, x, y, G, canonical, b=BIN, eps=EPS):
 
 
 def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
-              gfit=GFIT, b=BIN, npass=NPASS, eps=EPS, deep=True,
-              variance=None, prior_sigma=PRIOR_SIGMA, verbose=True):
+              gfit=GFIT, b=BIN, npass=NPASS, eps=EPS, variance=None,
+              prior_sigma=PRIOR_SIGMA, verbose=True):
     """
     Parameters
     ----------
@@ -169,9 +169,6 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
     canonical: (r, T)
     sky_sigma: float
         For the segmentation threshold
-    deep: bool, optional
-        Segment the residual with deep_segmentation (default)
-        rather than the 1.5 sigma per-pixel field_segmentation
     variance: array, optional
         Per-pixel variance; the cells are then weighted by their
         good-pixel count over their mean variance (uniform
@@ -187,7 +184,6 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
     values, ncell, chi2 per cell
     """
     from scipy import sparse
-    from lsst_mdet.starsub import field_segmentation
     from .visit import render_canonical_stars
 
     ny, nx = image.shape
@@ -285,10 +281,7 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
             image.shape, stars, canonical, gsub=99.0, amps=A, verbose=False,
         )
         resid = image - sky_full - model_full
-        if deep:
-            seg_excl = deep_segmentation(resid, good, sky_sigma)
-        else:
-            seg_excl = field_segmentation(resid, good, sky_sigma) > 0
+        seg_excl = deep_segmentation(resid, good, sky_sigma)
         if verbose:
             print(f'    segmentation excludes {seg_excl[good].mean() * 100:.1f} '
                   f'percent of the good pixels')

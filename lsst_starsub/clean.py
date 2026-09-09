@@ -10,9 +10,8 @@ import numpy as np
 
 
 def run_clean(vexp, gaia, tbox, state_name, gsub, nround, grow_bright,
-              star_model, canonical, sky_from='stars', truth=None,
-              inj=None, joint_spacing=None, joint_final=False,
-              joint_deep=True, joint_shape='canonical', joint_prior=None):
+              star_model, canonical, truth=None, inj=None,
+              joint_spacing=None, joint_prior=None):
     """
     run handle_stars_visit on vexp (in place) and measure the
     profiles of the states around the census stars
@@ -48,9 +47,7 @@ def run_clean(vexp, gaia, tbox, state_name, gsub, nround, grow_bright,
     res = handle_stars_visit(
         vexp, gaia, gsub=gsub, restore='none', nround=nround,
         grow_bright=grow_bright, star_model=star_model,
-        canonical=canonical, sky_from=sky_from,
-        joint_spacing=joint_spacing, joint_final=joint_final,
-        joint_deep=joint_deep, joint_shape=joint_shape,
+        canonical=canonical, joint_spacing=joint_spacing,
         joint_prior=joint_prior,
     )
     shape = vexp.image.array.shape
@@ -81,45 +78,16 @@ def run_clean(vexp, gaia, tbox, state_name, gsub, nround, grow_bright,
         states, vexp, res['stars'], seg, ambient=ambient, mode='dmask',
     )
     star_table = res['star_table']
-    extra = {}
-    if star_model == 'joint':
-        # the same profiles on the pixels the joint fit used: the
-        # deep segmentation of the residual applied as a mask,
-        # the star's own detected features (spikes, halo blobs)
-        # included in it
-        from .joint import deep_segmentation
-        det = deep_segmentation(residual, vexp.good, vexp.sky_sigma)
-        good_fit = vexp.good & ~det
-        zero_seg = np.zeros(seg.shape, dtype=seg.dtype)
-        # their own ambient reference, on the same pixels (the
-        # masked pixels sit below the all-pixel level by the
-        # faint-source light the mask removes)
-        ambient_fit = ambient_levels(states, vexp, zero_seg,
-                                     wide | ~good_fit)
-        print('    ambient levels on the fit pixels (nJy): ' + ', '.join(
-            f'{k} {v:.2f}' for k, v in ambient_fit.items()
-        ))
-        _, ptable_fit = measure_profiles(
-            states, vexp, res['stars'], zero_seg, ambient=ambient_fit,
-            good=good_fit,
-        )
-        _, dtable_fit = measure_profiles(
-            states, vexp, res['stars'], zero_seg, ambient=ambient_fit,
-            mode='dmask', good=good_fit,
-        )
-        extra['profiles_fitpix'] = ptable_fit
-        extra['profiles_dmask_fitpix'] = dtable_fit
     if inj is not None:
         from .inject import flag_injected
         star_table = flag_injected(star_table, inj)
         ptable = flag_injected(ptable, inj)
         dtable = flag_injected(dtable, inj)
-        extra = {k: flag_injected(v, inj) for k, v in extra.items()}
     return dict(
         res=res, states=states, seg=seg, ambient=ambient,
         edges=edges, ptable=ptable, dedges=dedges, dtable=dtable,
         star_table=star_table, truth=truth, inj=inj,
-        sky_sigma=vexp.sky_sigma, vexp=vexp, extra_tables=extra,
+        sky_sigma=vexp.sky_sigma, vexp=vexp,
     )
 
 
@@ -168,8 +136,7 @@ def write_clean_file(stem, out, meta, no_images=False, extra_tables=None):
         dedges_t['edges'][0] = dedges
         fits.write_table(dedges_t, extname='dmask_edges')
         fits.write_table(_meta_table(meta), extname='meta')
-        for name, tab in {**out.get('extra_tables', {}),
-                          **(extra_tables or {})}.items():
+        for name, tab in (extra_tables or {}).items():
             fits.write_table(tab, extname=name)
     try:
         plot_summary(stem + '.png', out['vexp'], res, out['states'],
@@ -179,21 +146,10 @@ def write_clean_file(stem, out, meta, no_images=False, extra_tables=None):
     return fname
 
 
-def clean_tag(state, star_model, sky_from, inject_tag=None,
-              joint_spacing=None, joint_final=False, joint_deep=True,
-              joint_shape='canonical'):
+def clean_tag(state, star_model, inject_tag=None, joint_spacing=None):
     tag = state if star_model == 'template' else f'{state}-{star_model}'
-    if star_model == 'joint':
-        if joint_spacing is not None:
-            tag += f'{int(joint_spacing)}'
-        if joint_shape != 'canonical':
-            tag += f'-{joint_shape}'
-        if joint_deep:
-            tag += '-deep'
-        if joint_final:
-            tag += '-final'
-    if sky_from != 'stars':
-        tag += f'-sky{sky_from}'
+    if star_model == 'joint' and joint_spacing is not None:
+        tag += f'{int(joint_spacing)}'
     if inject_tag:
         tag += f'-{inject_tag}'
     return tag

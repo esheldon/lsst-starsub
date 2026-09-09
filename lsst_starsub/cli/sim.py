@@ -45,27 +45,15 @@ def get_args():
                         choices=['forward', 'none', 'restored'])
     parser.add_argument('--gsub', type=float, default=GSUB)
     parser.add_argument('--nround', type=int, default=2)
-    parser.add_argument('--star-model', default='template',
-                        choices=['template', 'canonical', 'canonical-fit', 'joint'])
+    parser.add_argument('--star-model', default='joint',
+                        choices=['joint', 'template', 'canonical'])
     parser.add_argument('--bright-grow', type=float, default=None)
-    parser.add_argument('--sky-from', default='stars',
-                        choices=['stars', 'residual'])
     parser.add_argument('--joint-spacing', type=float, default=None,
                         help='joint model: sky mesh node spacing (px)')
-    parser.add_argument('--joint-shape', default='canonical',
-                        choices=['canonical', 'coadd'],
-                        help='joint model: the shipped canonical wing or '
-                             'the shape derived from the coadd itself')
     parser.add_argument('--joint-prior', type=float, default=None,
                         help='joint model: amplitude prior width about the '
                              'prediction (default lsst_starsub.joint.'
                              'PRIOR_SIGMA; 0 disables)')
-    parser.add_argument('--joint-shallow-seg', action='store_true',
-                        help='joint model: the 1.5 sigma per-pixel '
-                             'segmentation instead of the deep one')
-    parser.add_argument('--joint-final-pass', action='store_true',
-                        help='joint model: add the 64 px pass on the '
-                             'star-free image')
     parser.add_argument('--no-images', action='store_true')
     return parser.parse_args()
 
@@ -193,10 +181,8 @@ def main():
     out = run_clean(
         vexp, gaia, tbox, args.state, args.gsub, args.nround,
         args.bright_grow, args.star_model, canonical,
-        sky_from=args.sky_from, truth=truth, inj=truth_table,
-        joint_spacing=args.joint_spacing, joint_final=args.joint_final_pass,
-        joint_deep=not args.joint_shallow_seg,
-        joint_shape=args.joint_shape,
+        truth=truth, inj=truth_table,
+        joint_spacing=args.joint_spacing,
         joint_prior=None if args.joint_prior is None
         else (None if args.joint_prior <= 0 else args.joint_prior),
     )
@@ -222,17 +208,11 @@ def main():
         fwhm=res['fwhm'] if res['fwhm'] is not None else -1.0,
         bright_grow=-1.0 if args.bright_grow is None else args.bright_grow,
         star_model=args.star_model, inject='sim', inject_wing_scale=1.0,
-        sky_from=args.sky_from, seed=seed, sim_file=sim_name,
+        seed=seed, sim_file=sim_name,
         **cfg,
     )
-    tag = f'sim{seed}-' + clean_tag(
-        args.state, args.star_model, args.sky_from,
-        joint_spacing=args.joint_spacing, joint_final=args.joint_final_pass,
-        joint_deep=not args.joint_shallow_seg,
-        joint_shape=args.joint_shape,
-        joint_prior=None if args.joint_prior is None
-        else (None if args.joint_prior <= 0 else args.joint_prior),
-    )
+    tag = f'sim{seed}-' + clean_tag(args.state, args.star_model,
+                                    joint_spacing=args.joint_spacing)
     stem = clean_stem(args.outdir, tag, args.tract, args.patch, args.band)
     write_clean_file(stem, out, meta, no_images=args.no_images,
                      extra_tables={'trough_dmask': ttable})

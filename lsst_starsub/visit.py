@@ -54,7 +54,6 @@ from lsst_mdet.defaults import DM_INTRP, DM_NO_DATA, DM_SAT
 from lsst_mdet.patchfiles import SimpleBox
 from lsst_mdet.starsub import (
     APOD_STARS, GSUB, PRE_BW, PRE_GROW, TMPL_OUT_MAX,
-    TMPL_OUT_HALF as TMPL_OUT_HALF_DEFAULT,
     build_star_mask, circle_radius, field_segmentation,
     make_star_table, measure_coadd_fwhm, select_stars,
     subtract_stars, template_out_half,
@@ -309,14 +308,6 @@ def build_wide_star_mask(stars, shape):
     return wide
 
 
-def sky_background_copy(vexp, exclude, bw):
-    """sky_background without the in-place subtraction"""
-    saved = vexp.image.array.copy()
-    back = sky_background(vexp, exclude, bw)
-    vexp.image.array[:, :] = saved
-    return back
-
-
 def sky_background(vexp, exclude, bw):
     """
     mask-aware sep background of the current image, subtracted
@@ -386,57 +377,10 @@ def render_canonical_stars(shape, stars, canonical, gsub=GSUB, amps=None,
     return image
 
 
-class canonical_template(object):
-    """
-    context that makes lsst_mdet.starsub.subtract_stars use the
-    canonical wing's radial shape as its extended template
-    (sized for the brightest census star, edge-tapered as
-    extend_template_halo) instead of building one from the
-    image's stamps; a no-op when canonical is None
-    """
-
-    def __init__(self, canonical, stars):
-        self.canonical = canonical
-        self.stars = stars
-        self._saved = None
-
-    def __enter__(self):
-        if self.canonical is None:
-            return self
-        import lsst_mdet.starsub as ss
-
-        r, T = self.canonical
-        out_half = TMPL_OUT_HALF_DEFAULT
-        if self.stars.size > 0:
-            out_half = max(template_out_half(float(g))
-                           for g in self.stars['G'])
-        out_half += 2
-        gy, gx = np.mgrid[-out_half:out_half + 1, -out_half:out_half + 1]
-        rr = np.hypot(gy, gx)
-        big = np.interp(rr, r, T, right=0.0)
-        big *= np.clip((out_half - 2.0 - rr) / 5.0, 0.0, 1.0)
-
-        def fake_build_template(*args, **kwargs):
-            print(f'    canonical template: extent {out_half}')
-            return big
-
-        self._saved = ss.build_template
-        ss.build_template = fake_build_template
-        return self
-
-    def __exit__(self, *exc):
-        if self._saved is not None:
-            import lsst_mdet.starsub as ss
-            ss.build_template = self._saved
-        return False
-
-
 def handle_stars_visit(vexp, gaia, gsub=GSUB, restore='initial',
                        nround=NROUND, grow_bright=None,
                        star_model='template', canonical=None,
-                       sky_from='stars', joint_spacing=None,
-                       joint_final=False, joint_deep=True,
-                       joint_shape='canonical', joint_prior=None):
+                       joint_spacing=None, joint_prior=None):
     """
     the joint star-wing and sky characterization of one detector
 
@@ -475,33 +419,18 @@ def handle_stars_visit(vexp, gaia, gsub=GSUB, restore='initial',
         with per-star anchor-ring amplitudes; 'canonical': the
         canonical wing (nJy per unit Gaia flux, from the visit
         templates) rendered as a pure prediction, no per-star
-        fit; 'canonical-fit': the canonical wing's shape with the
-        per-star amplitudes fit as for 'template'; 'joint': the
-        canonical shape with the amplitudes and a bilinear sky
-        mesh solved together (lsst_starsub.joint), no rounds
-    canonical: (r, T), optional
-        The canonical wing (lsst_starsub.template.read_canonical_wing)
-        for the canonical star models
-    sky_from: str, optional
-        What the PRE_BW sky passes of the rounds after the first
-        see: 'stars', the image with the previous star model added
-        back (the boxes beyond the exclusion then follow the
-        wings, and the amplitude refit absorbs the sky error: the
-        injection test's finding); 'residual', the star-subtracted
-        image, the model re-added afterwards for the amplitude
-        refit
+        fit; 'joint': the canonical shape with the amplitudes and
+        a bilinear sky mesh solved together (lsst_starsub.joint),
+        no rounds: the production model
+    canonical: WingModel or (r, T), optional
+        The canonical wing (lsst_starsub.wing.read_wing_model)
+        for the canonical and joint star models
     joint_spacing: float, optional
         The sky mesh node spacing of the joint fit (default
         lsst_starsub.joint.SPACING)
-    joint_final: bool, optional
-        Joint fit: follow with the PRE_BW pass on the star-free
-        image as the other models do (default: the mesh is the
-        whole sky model)
-    joint_shape: str, optional
-        'canonical': the shipped wing; 'coadd': the shape derived
-        from this coadd's own stamps and aureole
-        (lsst_starsub.shape.coadd_wing_shape) on a WIDE_BW
-        flattening, no canonical file needed
+    joint_prior: float, optional
+        The amplitude prior width of the joint fit (default
+        lsst_starsub.joint.PRIOR_SIGMA)
 
     Returns
     -------
@@ -545,17 +474,6 @@ def handle_stars_visit(vexp, gaia, gsub=GSUB, restore='initial',
     sky = np.zeros(mask0.shape, dtype='f4')
     star_model_img = np.zeros(mask0.shape, dtype='f4')
     slist = []
-    if star_model == 'joint' and joint_shape == 'coadd':
-        from .shape import coadd_wing_shape
-        from lsst_mdet.starsub import field_segmentation
-        # a first-pass flattening for the stamps and the aureole
-        flat0 = vexp.image.array - sky_background_copy(vexp, wide, WIDE_BW)
-        seg0 = field_segmentation(flat0, vexp.good, vexp.sky_sigma)
-        canonical, shape_params = coadd_wing_shape(
-            flat0, vexp.good, seg0, gaia, x, y, stars,
-            band=vexp.band, fwhm=fwhm,
-        )
-        del flat0, seg0
     if star_model != 'template' and canonical is None:
         raise ValueError(f'star_model {star_model!r} needs the canonical wing')
     if star_model == 'joint':
@@ -564,37 +482,29 @@ def handle_stars_visit(vexp, gaia, gsub=GSUB, restore='initial',
             vexp.image.array, vexp.good & ~starmask, stars, canonical,
             vexp.sky_sigma,
             spacing=SPACING if joint_spacing is None else joint_spacing,
-            deep=joint_deep, variance=vexp.variance.array,
+            variance=vexp.variance.array,
             **({} if joint_prior is None else dict(prior_sigma=joint_prior)),
         )
         sky += jf['sky']
         star_model_img = jf['star_model']
         vexp.image.array[:, :] -= jf['sky'] + star_model_img
-        if joint_final:
-            sky += sky_background(vexp, exclude=fine_excl, bw=PRE_BW)
         star_table = make_star_table(stars, [])
         star_table['A'] = jf['A']
         return dict(
             stars=stars, star_table=star_table, starmask=starmask,
             dstar=dstar, slist=[], restored=restored, sky=sky,
             star_model=star_model_img, delivered=delivered, fwhm=fwhm,
-            joint=jf, canonical=canonical,
+            joint=jf,
         )
     for iround in range(nround):
         print(f'  round {iround + 1} of {nround}')
         bw = WIDE_BW if iround == 0 else PRE_BW
         excl = wide if iround == 0 else fine_excl
-        if iround > 0 and sky_from == 'residual':
-            # the sky from the star-free image, then the stars
-            # back for the amplitude refit on the refined sky
-            sky += sky_background(vexp, exclude=excl, bw=bw)
+        if iround > 0:
+            # re-anchor: put the stars back, refit the sky
+            # without them in the boxes, then refit the stars
             vexp.image.array[:, :] += star_model_img
-        else:
-            if iround > 0:
-                # re-anchor: put the stars back, refit the sky
-                # without them in the boxes, then refit the stars
-                vexp.image.array[:, :] += star_model_img
-            sky += sky_background(vexp, exclude=excl, bw=bw)
+        sky += sky_background(vexp, exclude=excl, bw=bw)
 
         if star_model == 'canonical':
             slist = []
@@ -603,14 +513,10 @@ def handle_stars_visit(vexp, gaia, gsub=GSUB, restore='initial',
             )
             vexp.image.array[:, :] -= star_model_img
         else:
-            with canonical_template(
-                canonical if star_model == 'canonical-fit' else None,
-                stars,
-            ):
-                slist = subtract_stars(
-                    vexp.image.array, vexp.variance.array, mask0,
-                    gaia, x, y, stars, comps, band=vexp.band, fwhm=fwhm,
-                )
+            slist = subtract_stars(
+                vexp.image.array, vexp.variance.array, mask0,
+                gaia, x, y, stars, comps, band=vexp.band, fwhm=fwhm,
+            )
             star_model_img = star_model_image(mask0.shape, slist)
 
     # the refined sky on the star-free image

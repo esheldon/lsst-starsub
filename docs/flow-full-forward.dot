@@ -1,4 +1,7 @@
-// the star-wing and background pipeline, visit level to cleaned coadd
+// the full forward-model pipeline (visit level to cleaned coadd) as
+// it was built and validated, kept as the record: the restoration,
+// response-coadd and forward-state tools were removed once the joint
+// fit (flow-joint.dot) made them unnecessary
 // render: dot -Tpdf docs/flow-full-forward.dot -o flow-full-forward.pdf
 //         dot -Tpng -Gdpi=110 docs/flow-full-forward.dot -o flow-full-forward.png
 digraph starsub {

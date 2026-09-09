@@ -1,26 +1,16 @@
 """
-the forward-modeled trough: the visit polynomials' response to
-the star wings, carried into the cell coadd
+the per-visit template as a radial wing, and the star renderer
 
-Per input (visit, detector) the census stars' wing images are
-rendered from the visit's pooled template (lsst_starsub.template:
-the stack profile inside the junction, the two-power-law halo
-beyond, scaled by k_in 10^(-0.4 G)), the star_background fit of
-calibrateImage is rebuilt (lsst_starsub.forward) and its response
-to the star image, fit(raw) - fit(raw - stars), is the part of the
-stored polynomial that is star light.  The response gets the same
-order-2 surface removal as the stored polynomials in the
-restoration, and is coadded per cell with the same input weights
-(ResponseCache plugs into polynomial_cell_coadd), giving the
-forward model of restored - none
+radial_template turns a pooled per-visit template (the stack
+profile inside the junction, the two-power-law halo beyond) into
+(r, T); render_wing_image draws census stars from such a radial
+wing, with optional per-star amplitudes.  The canonical wing per
+band is the median over visits of k_in T(r)
 """
 import os
 
 import numpy as np
 
-from .coadd import COARSE_FACTOR, SMOOTH_ORDER, PolynomialCache, \
-    fit_smooth_surface
-from .visit import INSTRUMENT
 
 # stars rendered for the response: the polynomial only sees the
 # wings outside the fit mask, and below this the wings are
@@ -130,126 +120,3 @@ def render_wing_image(shape, x, y, gmag, rt, k_in, calib,
         image[y0:y1, x0:x1] += np.interp(rr, r, prof, right=0.0).astype('f4')
         n += 1
     return image, n
-
-
-class ResponseCache(PolynomialCache):
-    """
-    per (visit, detector) coarse renderings of the polynomial's
-    response to the visit template's star wings, in the entry
-    layout of PolynomialCache (coarse structure, wcs, bbox,
-    level) so polynomial_cell_coadd coadds them per cell with
-    the input weights
-
-    Parameters
-    ----------
-    butler: Butler
-    template_dir: str
-        Holds template-{visit}-{band}.fits per input visit
-    gaia_dir: str
-        Holds the per-visit Gaia files (lsst_starsub.gaia)
-    band: str
-    """
-
-    def __init__(self, butler, template_dir, gaia_dir, band,
-                 factor=COARSE_FACTOR, order=SMOOTH_ORDER,
-                 canonical=None):
-        super().__init__(butler, factor=factor, order=order)
-        self.template_dir = template_dir
-        self.gaia_dir = gaia_dir
-        self.band = band
-        # a canonical wing file (template.write_canonical_wing):
-        # the same physical wing, nJy per unit Gaia flux, for every
-        # visit, in place of the per-visit templates
-        self.canonical = canonical
-        self._templates = {}
-        self._gaia = {}
-        self.stats = {}
-
-    def _spawn(self, butler):
-        return ResponseCache(
-            butler, self.template_dir, self.gaia_dir, self.band,
-            factor=self.factor, order=self.order,
-            canonical=self.canonical,
-        )
-
-    def template(self, visit):
-        from .template import read_canonical_wing, read_template_file
-
-        visit = int(visit)
-        if self.canonical is not None:
-            if 'canonical' not in self._templates:
-                r, T = read_canonical_wing(self.canonical)
-                self._templates['canonical'] = ((r, T), dict(k_in=1.0))
-            return self._templates['canonical']
-        if visit not in self._templates:
-            t = read_template_file(
-                template_path(self.template_dir, visit, self.band),
-            )
-            self._templates[visit] = (radial_template(t), t['params'])
-        return self._templates[visit]
-
-    def gaia(self, visit):
-        import rustfits
-        from .gaia import visit_gaia_path
-
-        visit = int(visit)
-        if visit not in self._gaia:
-            self._gaia[visit] = rustfits.read(
-                visit_gaia_path(self.gaia_dir, visit),
-            )
-        return self._gaia[visit]
-
-    def get(self, visit, detector):
-        key = (int(visit), int(detector))
-        if key in self._models:
-            return self._models[key]
-        from lsst_mdet.gaia import gaia_from_columns, gaia_pixel_positions
-        from lsst_mdet.patchfiles import SimpleBox
-        from lsst_mdet.wcs import ButlerWcs
-        from . import forward
-
-        did = dict(instrument=INSTRUMENT, visit=int(visit),
-                   detector=int(detector))
-        raw, bglist, calib, meta = forward.load_raw_exposure(
-            self.butler, visit, detector,
-        )
-        prelim = self.butler.get('preliminary_visit_image', dataId=did)
-        mask, fracs = forward.reconstruct_fit_mask(raw, prelim, meta)
-
-        wcs = prelim.getWcs()
-        bbox = prelim.getBBox()
-        ny, nx = raw.image.array.shape
-        bwcs = ButlerWcs(wcs)
-        box = SimpleBox(bbox.getBeginX(), bbox.getEndX(),
-                        bbox.getBeginY(), bbox.getEndY())
-        g = self.gaia(visit)
-        gaia = gaia_from_columns(
-            ra=g['ra'], dec=g['dec'], gmag=g['phot_g_mean_mag'],
-            wcs=bwcs, bbox=box, gmax=RENDER_GMAX,
-            pmra=g['pmra'], pmdec=g['pmdec'],
-        )
-        x, y = gaia_pixel_positions(gaia, bwcs, box)
-        rt, params = self.template(visit)
-        star, nstar = render_wing_image(
-            (ny, nx), x, y, gaia['phot_g_mean_mag'], rt,
-            params['k_in'], calib,
-        )
-        res = forward.polynomial_response(raw, mask, star)
-        resp = res['response'] * calib
-        coarse = np.ascontiguousarray(
-            resp[::self.factor, ::self.factor], dtype='f8',
-        )
-        level = float(np.mean(coarse))
-        coarse = coarse - fit_smooth_surface(coarse, self.order)
-        self._models[key] = (coarse, wcs, bbox, level)
-        self.stats[key] = dict(
-            nstar=nstar, detected_fraction=fracs['detected_fraction'],
-            response_rms=float(resp.std()), level=level,
-        )
-        print(
-            f'    response {visit} {detector}: {nstar} stars rendered, '
-            f'mask {fracs["detected_fraction"]:.3f}, rms '
-            f'{resp.std():.3f} nJy, level {level:.3f}'
-        )
-        del raw, prelim, mask, star, res
-        return self._models[key]

@@ -48,7 +48,7 @@ for tr in $tracts; do
 #SBATCH --partition=milano
 #SBATCH --account=rubin:default
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
-/usr/bin/time -v lsst-starsub-cell-clean --tract $tr --patch $p --band $band --state none \\
+/usr/bin/time -v lsst-starsub-cell-clean --tract $tr --patch $p --band $band \\
     --gaia-file $base/gaia/gaia-dr3-$tt.fits --canonical $wing \\
     --outdir $outdir --star-model joint --no-images \\
     --repo dp2_prep_future --collection LSSTCam/runs/DRP/DP2

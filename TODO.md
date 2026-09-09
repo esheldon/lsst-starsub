@@ -822,6 +822,25 @@ template job per detector of the 28 visits, `extracts-{visit}/`).
      being high by the k_stamp / k_in ratio and the free
      amplitudes compensating).
 
+7d. **Cleanup** (2026-09-09, before the shear test).  Removed as
+   dead ends or superseded: the coadd-derived shape (`shape.py`),
+   the magnitude term and the self-calibration scripts, the
+   `sky_from`, `joint_final`, `joint_shape` and shallow-segmentation
+   options, the `canonical-fit` star model, the sequential-scheme
+   comparison scripts and the sky-smoothness diagnostic, the
+   statistical restoration (`cell_restore`, `make_slurm_cells`, the
+   polynomial cache in `coadd.py`), the response coadd
+   (`cell_forward`, `ResponseCache`) and the `forward` / `restored`
+   input states of the clean tool, the visit-level `remeasure` and
+   `make_slurm` tools.  `lsst-starsub-cell-clean` now reads the
+   delivered coadd from the butler and defaults to the joint model;
+   `wing.py` is the wing reader; `forward.py` / `forward_check`
+   stay as the account of the trough (the simulation uses the DM
+   fit), `run_visit` and `stack` as the visit-level diagnostics.
+   The old pipeline chart is kept as `docs/flow-full-forward.dot`;
+   the earlier run outputs under `~/oh/starsub-visits` still read
+   with the stack and comparison scripts.
+
 8. **Integration and validation.**  The per-input response is
    computed once per visit-detector (~40 s on slurm) and stored as a
    small coarse array; the coadd stage sums stored arrays per cell;
