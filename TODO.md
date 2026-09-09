@@ -841,6 +841,19 @@ template job per detector of the 28 visits, `extracts-{visit}/`).
    the earlier run outputs under `~/oh/starsub-visits` still read
    with the stack and comparison scripts.
 
+7e. **Timing for on-the-fly use** (2026-09-09; the coadds cannot
+   be stored, so the clean runs inside the metadetection job).
+   Patch 55, one core, warm process: butler get plus object
+   background restore 16 s and stitch 1 s (the metadetection job
+   pays these anyway), census and star masks 1.3 s, joint fit 5.6
+   s (14 s on the first call of a process: numba compiling the
+   detection kernel, and the star renders), subtraction 0.  Peak
+   2.3 GB with the cell coadd object held.  The mesh render was
+   6.7 of the 17 s before: scipy's RegularGridInterpolator over
+   10^7 pixels, replaced by a direct separable bilinear
+   evaluation (0.06 s, identical to 1e-15).  So about 7 s per
+   patch per band added to a metadetection run.
+
 8. **Integration and validation.**  The per-input response is
    computed once per visit-detector (~40 s on slurm) and stored as a
    small coarse array; the coadd stage sums stored arrays per cell;

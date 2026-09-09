@@ -113,16 +113,23 @@ def mesh_columns(cy, cx, shape, spacing):
 
 def render_mesh(nodes, values, shape):
     """the bilinear mesh at full resolution"""
-    from scipy.interpolate import RegularGridInterpolator
-
     xn, yn = nodes
-    f = RegularGridInterpolator(
-        (yn, xn), values.reshape(yn.size, xn.size), method='linear',
-        bounds_error=False, fill_value=None,
-    )
+    vals = np.asarray(values, dtype='f8').reshape(yn.size, xn.size)
     ny, nx = shape
-    gy, gx = np.mgrid[0:ny, 0:nx]
-    return f(np.stack([gy.ravel(), gx.ravel()], 1)).reshape(ny, nx)
+    spacing = float(xn[1] - xn[0])
+    xs = np.arange(nx, dtype='f8')
+    ys = np.arange(ny, dtype='f8')
+    ix = np.clip((xs // spacing).astype(int), 0, xn.size - 2)
+    iy = np.clip((ys // spacing).astype(int), 0, yn.size - 2)
+    fx = (xs - xn[ix]) / spacing
+    fy = (ys - yn[iy]) / spacing
+    # separable bilinear weights: rows blend two node rows, then
+    # columns blend two node columns
+    top = vals[iy]                       # (ny, nxn)
+    bot = vals[iy + 1]
+    rows = (1 - fy)[:, None] * top + fy[:, None] * bot
+    out = (1 - fx)[None, :] * rows[:, ix] + fx[None, :] * rows[:, ix + 1]
+    return out
 
 
 def star_column(cy, cx, x, y, G, canonical, b=BIN, eps=EPS):
