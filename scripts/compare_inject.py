@@ -25,6 +25,7 @@ cdir = sys.argv[1]
 tags = os.environ.get('INJECT_TAGS', sys.argv[2]).split(',')
 patches = [int(p) for p in sys.argv[3:]]
 tract = int(os.environ.get('TRACT', 7275))
+band = os.environ.get('BAND', 'i')
 gbins = [(6, 13), (13, 14), (14, 15.2), (15.2, 16), (16, 17)]
 picks = [5, 10, 20, 30, 45]
 curves = [
@@ -72,7 +73,7 @@ for tag in tags:
     for patch in patches:
         # simulation tags carry the seed, the patch number by default
         t = tag.replace('simSEED', f'sim{patch}')
-        f = f'{cdir}/clean-{t}-{tract:05d}-{patch:02d}-i.fits'
+        f = f'{cdir}/clean-{t}-{tract:05d}-{patch:02d}-{band}.fits'
         if not os.path.exists(f):
             continue
         with rustfits.FITS(f) as fits:

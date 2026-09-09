@@ -871,6 +871,18 @@ template job per detector of the 28 visits, `extracts-{visit}/`).
    i-band wing is calibrated; the test links r and z to it (the
    shape per band is a known gap: run the per-visit template
    pooling for the other bands at S3DF).
+   Pipeline test on 7275/55, cells (10,10) and (11,11), r i z with
+   metadetection: joint route 79 s and 3.0 GB against the reference
+   route's 83 s and 2.1 GB; the same 144 catalog rows, 47-48 of 48
+   objects matched per metacal step, fluxes within 0.12-0.17 of
+   their errors and shapes within 0.03-0.08 (no bright star in
+   those cells, so the routes should agree).  `mdet-test/`.
+   The r and z wings: `scripts/band_wing.sh BAND VISITFILE
+   [MAXVISITS]` runs the per-visit extracts on slurm with the
+   preemption sweeps, pools per visit and writes the canonical
+   wing; launched 2026-09-09 with all 21 r visits and 24 of the 43
+   z visits of tract 7275 (`07275-cells/tract-visits-{r,z}.txt`
+   from the cell inputs of 8 patches).
 
 8. **Integration and validation.**  The per-input response is
    computed once per visit-detector (~40 s on slurm) and stored as a
