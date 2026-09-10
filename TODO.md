@@ -1011,9 +1011,11 @@ template job per detector of the 28 visits, `extracts-{visit}/`).
    per-cell detections): that is the shear test's 2.9 GB.  Fixed:
    the stack starts at 2e6, grows by 4 on a 'pixel buffer full'
    overflow, and the previous settings are restored after.  Two
-   cells by /usr/bin/time: 2.57 -> 1.93 GB (template 2.02).
-   lsst_mdet's own `field_segmentation` sets 1.2e7 (0.5 GB) and
-   leaves it global as well; left alone as reference code.  Numba
+   cells by /usr/bin/time: 2.57 -> 1.93 GB (template 2.02); the
+   full patch with metadetection 2.89 (shear test) -> 1.96 GB in
+   29.5 min.  lsst_mdet's own `field_segmentation` set 1.2e7
+   (0.5 GB) and left it global as well; given the same treatment
+   (SEG_PIXSTACK 2e6, grown on overflow, restored).  Numba
    would take at most ~0.3 GB more out of the fit (the design
    matrix, the cell binning) and ~3 s per band of its ~9 s (sep's
    segmentation is 5 s and already C); not worth it.
