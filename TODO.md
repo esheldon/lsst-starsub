@@ -1001,15 +1001,65 @@ template job per detector of the 28 visits, `extracts-{visit}/`).
    differences at f4 rounding (rms 1.5 x 10^-4 nJy).  Two-cell
    pipeline peak 2.25 -> 1.94 GB, level with the template route
    (1.93).  Full patch 55 with metadetection, RSS sampled every
-   0.5 s: peak 1.88 GB, in the z-band star stage at 26 s; the
-   metadetection stage stays at 1.3-1.5 GB (31.6 min).  The
-   shear-test joint patches had 2.9 GB by /usr/bin/time, so the
-   kernel-counted peak of the same run is being checked.  Numba
+   0.5 s: peak 1.88 GB, but the kernel high-water mark of the
+   same run was 2.68 GB (2.57 on two cells against 1.79 sampled
+   at 20 ms).  Tracking ru_maxrss stage by stage found it: sep's
+   pixel stack.  `deep_segmentation` set it to 2e7 entries, sep
+   touches the whole stack on every extract call (41 bytes per
+   entry: 0.82 GB, measured alone), the setting is process-global,
+   and every later sep call in the run paid it too (the redo, the
+   per-cell detections): that is the shear test's 2.9 GB.  Fixed:
+   the stack starts at 2e6, grows by 4 on a 'pixel buffer full'
+   overflow, and the previous settings are restored after.  Two
+   cells by /usr/bin/time: 2.57 -> 1.93 GB (template 2.02).
+   lsst_mdet's own `field_segmentation` sets 1.2e7 (0.5 GB) and
+   leaves it global as well; left alone as reference code.  Numba
    would take at most ~0.3 GB more out of the fit (the design
    matrix, the cell binning) and ~3 s per band of its ~9 s (sep's
-   segmentation is 5 s and already C); not worth it: the process
-   peak is set by the loaded coadds plus the star stage of the
-   third band in both routes.
+   segmentation is 5 s and already C); not worth it.
+
+7i. **The background redo with the joint route** (2026-09-10).
+   lsst_mdet's `--redo-bg` ran its 64 px sep background on the
+   joint-cleaned image as well (the shear test ran this
+   combination; the injection, simulation and residual tests did
+   not).  Measured on 7275/55 i (scratch `redo_after_joint.py`):
+   the second background is +0.21 nJy (0.03 sigma) with 0.21 nJy
+   rms at 64 px, flat in distance from the star masks (+0.22 at
+   12-30 px, +0.21 far), so the stars were untouched; but it is
+   driven by faint-source light (+0.25 within 4 px of the deep
+   detections, +0.12 at 32-64 px) and the joint-cleaned empty sky
+   12-64 px from any deep detection sits at -0.20 to -0.25 nJy, so
+   the redo left it near -0.4 nJy (0.06 sigma per pixel under the
+   galaxies): the 64 px over-subtraction the deep mask avoids,
+   re-imprinted.  Fix (temporary until the routes are
+   streamlined): `redo_background(..., subtract=False)` for the
+   joint method in lsst_mdet cells.py and getimages, keeping the
+   masks, the noise calibration and the sky-variance map for the
+   weights.  Note the joint mesh itself is +0.2 nJy high in the
+   empty sky for the same reason at 256 px.  On two cells of
+   7275/55 the change adds 3 detections (48 -> 51) and raises the
+   faint fluxes by ~40 nJy per object (7 percent at 300-1000 nJy,
+   0.4 percent above 3000): the sky zero point under the galaxies
+   is a real systematic at the 0.2-0.4 nJy per pixel level, and
+   which level is right needs the simulation (known sky).
+
+7j. **Output additions** (2026-09-10).  `g1g2_cov` in the catalog:
+   the ml path from ngmix's g_cov; the deblend path propagates the
+   full e covariance through the e -> g jacobian, with the e1-e2
+   cross term added to kdeblend (`_shape_cov`, the same family
+   covariance sandwich as the errors); correlation coefficients
+   -0.3..+0.7 on the test cells.  The joint fit is written to four
+   small tables in the catalog file (`starsub_meta` per band:
+   shape, mesh geometry, settings, chi2, sky sigma, the background
+   restored, the wing file; `starsub_stars`: the census with
+   A_{band} and free_{band}; `starsub_sky`: one row per node per
+   band; `starsub_wing`: the radial profile per band; 45 kB per
+   patch).  `lsst_starsub.starsub.render_fit(tables, band)`
+   rebuilds the sky and star images: identical amplitudes, images
+   within f4 rounding of the direct call.  The frame: the fit is
+   relative to the delivered coadd with the stored object
+   background restored; the redo's noise factor is not in the
+   tables (it scales the variance, not the image).
 
 8. **Integration and validation.**  The per-input response is
    computed once per visit-detector (~40 s on slurm) and stored as a

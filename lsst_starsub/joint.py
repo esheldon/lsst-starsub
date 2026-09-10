@@ -28,6 +28,8 @@ MIN_CELL_FRAC = 0.5
 NPASS = 2
 SEG_GROW = 4     # px: the deep segmentation's footprints are grown by this
 RENDER_BLOCK = 256  # rows per block when rendering the mesh
+PIXSTACK = int(2e6)      # sep's pixel stack for the segmentation, entries
+PIXSTACK_MAX = int(3.2e7)  # grown by 4 on overflow up to this
 PRIOR_SIGMA = 0.3   # the amplitude prior about the prediction (A = 1):
                     # the colour scatter of the i-band to Gaia G flux
                     # ratio; isolated stars are constrained 10x better
@@ -52,16 +54,39 @@ def deep_segmentation(image, good, sig, grow=SEG_GROW):
     from scipy import ndimage
     from lsst_mdet.detect import DETECT_SETTINGS, make_kernel
 
-    sep.set_extract_pixstack(int(2e7))
-    sep.set_sub_object_limit(10240)
     kernel = make_kernel()
     imf = np.ascontiguousarray(image, dtype='f4')
-    _, seg = sep.extract(
-        imf, DETECT_SETTINGS['thresh'], err=sig, mask=~good,
-        segmentation_map=True, filter_kernel=kernel, filter_type='conv',
-        minarea=DETECT_SETTINGS['minarea'], deblend_nthresh=1,
-        deblend_cont=1.0,
-    )
+
+    # sep's pixel stack is process-global and touched in full on
+    # every extract call (41 bytes per entry: 2e7 entries cost
+    # 0.8 GB, and every later sep call in the process paid it, the
+    # per-cell detections included).  Start small, grow on
+    # overflow, and put the previous settings back
+    old_stack = sep.get_extract_pixstack()
+    old_sub = sep.get_sub_object_limit()
+    stack = PIXSTACK
+    try:
+        sep.set_sub_object_limit(10240)
+        while True:
+            sep.set_extract_pixstack(stack)
+            try:
+                _, seg = sep.extract(
+                    imf, DETECT_SETTINGS['thresh'], err=sig, mask=~good,
+                    segmentation_map=True, filter_kernel=kernel,
+                    filter_type='conv', minarea=DETECT_SETTINGS['minarea'],
+                    deblend_nthresh=1, deblend_cont=1.0,
+                )
+                break
+            except Exception as err:
+                if 'pixel buffer full' not in str(err) \
+                        or stack >= PIXSTACK_MAX:
+                    raise
+                stack *= 4
+                print(f'    segmentation pixel stack full; retrying '
+                      f'with {stack}')
+    finally:
+        sep.set_extract_pixstack(old_stack)
+        sep.set_sub_object_limit(old_sub)
     det = seg > 0
     if grow > 0:
         det = ndimage.binary_dilation(det, iterations=int(grow))
