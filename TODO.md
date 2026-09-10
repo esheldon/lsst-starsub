@@ -882,7 +882,18 @@ template job per detector of the 28 visits, `extracts-{visit}/`).
    preemption sweeps, pools per visit and writes the canonical
    wing; launched 2026-09-09 with all 21 r visits and 24 of the 43
    z visits of tract 7275 (`07275-cells/tract-visits-{r,z}.txt`
-   from the cell inputs of 8 patches).
+   from the cell inputs of 8 patches).  The first launch failed on
+   every detector: DP2 now serves `visit_image` as an lsst.images
+   VisitImage (packed two-byte mask planes under other names, no
+   getWcs / getPsf), which the loader took because the dataset
+   exists; `load_visit_exposure` now falls back to the calibrated
+   preliminary image unless the visit image is an afw exposure
+   (the path validated on DP2 before, 1-2 nJy from the visit
+   image).  Extract jobs that exit with an error are not caught
+   by the preemption sweep: check `Exit status` counts, not only
+   the queue.  The transfer check for r and z (the 12-tract joint
+   fit per band, `broadcal/run-transfer-rz.sh`) is chained behind
+   the wings.
 
 8. **Integration and validation.**  The per-input response is
    computed once per visit-detector (~40 s on slurm) and stored as a

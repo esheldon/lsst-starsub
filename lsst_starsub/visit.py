@@ -684,14 +684,21 @@ def load_visit_exposure(butler, visit, detector, rng=None):
         have_vi = bool(butler.exists('visit_image', did))
     except Exception:
         have_vi = False
+    exp = None
     if have_vi:
         exp = butler.get('visit_image', dataId=did)
-    else:
-        # DP2 has no visit_image: the preliminary image
-        # calibrated to nJy stands in.  On the weekly run the
-        # two differ by 1.4 nJy rms (0.04 sky sigma), the final
-        # calibration's spatial variation
-        print('    no visit_image; calibrating the preliminary image')
+        if not hasattr(exp.mask, 'getMaskPlaneDict'):
+            # an lsst.images VisitImage (DP2 since 2026-09-09):
+            # packed mask planes under other names, no getWcs or
+            # getPsf; the calibrated preliminary image stands in,
+            # as it did when DP2 had no visit_image at all
+            print('    visit_image is not an afw exposure; '
+                  'calibrating the preliminary image')
+            exp = None
+    if exp is None:
+        # the preliminary image calibrated to nJy.  On the weekly
+        # run the two differ by 1.4 nJy rms (0.04 sky sigma), the
+        # final calibration's spatial variation
         exp = prelim.clone()
         exp.setMaskedImage(
             prelim.getPhotoCalib().calibrateImage(prelim.getMaskedImage())
