@@ -934,6 +934,52 @@ template job per detector of the 28 visits, `extracts-{visit}/`).
    on 2558 (32 stars), and 10804 is noisy in every band.  One wing
    per band transfers for r and z as it did for i.
 
+7g. **The first shear test** (launched 2026-09-09 evening,
+   `~/oh/shear-test/`).  Two full metadetection runs of the same
+   243 patches (tracts 7275, 8982, 9941, the good-cells file) with
+   matched per-patch seeds: `template/` the reference star route,
+   `joint/` the joint fit with the calibrated r, i, z wings
+   (`wings/canonical-wing-{band}.fits`).  Generated with
+   `lsst-mdet-make-slurm --tracts ... --extra-args ...` (the
+   generator gained `--tracts` and `--extra-args`; the joint jobs
+   carry `--mem=8G`), submitted by `run-shear-test.sh`, which
+   sweeps preemptions and error exits, then runs
+   `lsst-mdet-make-corr-cats` (`stats/sums_config.yaml`, the
+   documented example selection) and `lsst-mdet-starcorr` on each
+   run.  The comparison: the tangential shear around stars by
+   magnitude bin, `stats/starcorr.fits` and its pdf in each run,
+   and the object counts near stars.  486 jobs, ~2 h each at most.
+
+   Result (2026-09-10).  All 486 jobs completed in 52 min (joint
+   3.0 GB per patch).  Galaxy selection (s2n > 10, T/T_psf > 0.5,
+   mfrac < 0.1, g_flags 0): template 86,003, joint 86,480 (+0.55
+   percent), the excess uniform in distance from G < 13 and G < 15
+   stars (0-30" 256 vs 259, 30-60" 3717 vs 3800, 60-120" 17,137 vs
+   17,235), so the joint route does not lose area near stars.
+   Objects paired within 0.5" (83,000, 96 percent of each): the
+   shear difference joint - template is consistent with zero in
+   every distance bin from G < 13 stars, e.g. 30-60" +4 +- 4 x 10^-4
+   in g1, 60-600" within +-1 x 10^-4 (errors 1-2 x 10^-4); the i
+   flux differs by a median +0.06-0.09 percent (joint brighter, the
+   collar removed) with 4-8 percent rms from the different sky and
+   star models.  Whole-sample <g1> +0.0028 template vs +0.0026 joint
+   (err 0.0010).  The tangential shear around stars (starcorr,
+   15 bins 0.05-30', compensated with randoms, jackknife errors) is
+   in each run's `stats/starcorr.fits` and pdf: both routes are
+   consistent with zero in every magnitude bin (bins with < 100
+   pairs dropped; the G < 16 stars have no pairs inside 0.17' because
+   of the star mask): gamma_t chi2/dof template 6.1/12, 16.7/13,
+   21.5/15, 15.3/15 and joint 8.3/12, 19.1/13, 19.7/15, 15.2/15 for
+   G 6-16, 16-18, 18-20, 20-21; the inverse-variance mean gamma_t
+   inside 1' around G < 16 stars is -0.3 +- 1.5 x 10^-3 (template)
+   and -0.6 +- 1.5 x 10^-3 (joint); the two runs differ by < 1 sigma
+   in every bin.  Conclusion: on 3.4 deg^2 the joint route is at
+   least as good as the template route (no residual star-galaxy
+   shear, 0.5 percent more galaxies, no lost area near stars); the
+   test has no power below ~1.5 x 10^-3 at 0.2-1' around bright
+   stars, so a survey-scale run is needed to see the collar-level
+   (10^-3 sigma) differences from the residual tests.
+
 8. **Integration and validation.**  The per-input response is
    computed once per visit-detector (~40 s on slurm) and stored as a
    small coarse array; the coadd stage sums stored arrays per cell;
