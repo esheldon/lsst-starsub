@@ -41,15 +41,10 @@ for v in $visits; do
       --outdir $tdir --repo dp2_prep_future --collection LSSTCam/runs/DRP/DP2 \
       > $tdir/pool-$v.log 2>&1 || echo "pooling failed for $v"
 done
-python - <<EOF
-import glob
-from lsst_starsub.template import canonical_wing, write_canonical_wing
-files = sorted(glob.glob('$tdir/template-*-$band.fits'))
-r, T, curves = canonical_wing(files)
-write_canonical_wing('$tdir/canonical-wing-07275-$band.fits', r, T, '$band', len(files))
-import numpy as np
-for rr in (50, 100, 300, 1000):
-    k = np.argmin(abs(r - rr)); s = np.std(curves[:, k]) / np.median(curves[:, k])
-    print(f'$band: {len(files)} visits; scatter at {rr} px {100 * s:.0f} percent')
-print('wrote', '$tdir/canonical-wing-07275-$band.fits')
-EOF
+python $S/canonical_from_templates.py $tdir $band $tdir/canonical-wing-07275-$band.fits
+# the extracts are intermediate (about 215 MB per visit): the pooled
+# template per visit is all the wing needs
+if [ -f $tdir/canonical-wing-07275-$band.fits ]; then
+  for v in $visits; do rm -rf $tdir/extracts-$v; done
+  echo "extracts removed; $(du -sh $tdir | cut -f1) in $tdir"
+fi

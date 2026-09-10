@@ -894,6 +894,45 @@ template job per detector of the 28 visits, `extracts-{visit}/`).
    the queue.  The transfer check for r and z (the 12-tract joint
    fit per band, `broadcal/run-transfer-rz.sh`) is chained behind
    the wings.
+   The r and z wings (all 8,054 extract jobs succeeded on the
+   rerun): the per-visit pooled fits fail on some visits, with the
+   inner slope at the scan bound (-5.0), a zero point k_in <= 0 or
+   a chi2 many times the median; 7 of the 24 z visits (all six of
+   2025-09-02, FWHM 1.15-1.38 arcsec) and 4 of the 21 r visits.  Left
+   in, they put the visit-to-visit scatter of the z wing at 110
+   percent at 100 px.  `scripts/canonical_from_templates.py` drops
+   them (k_in <= 0, slope <= -4.95, chi2 > 5 x median) and is now
+   the canonical step of `band_wing.sh`, which also removes the
+   extracts afterwards.  Survivors: r 17 visits, scatter 13 / 28 /
+   77 percent at 100 / 300 / 1000 px; z 17 visits, 14 / 22 / 51 (i
+   was 10 / 8 / 46).  Against the i wing: r is 1.05 at 100 px, 0.93
+   at 300, 0.83 at 1000; z 1.13, 1.06, 0.98; the bands differ by
+   10-20 percent, so the per-band wings matter.  Why the pooled fit
+   fails on those visits (poor seeing, the September night) is not
+   understood; the templates are kept for a look.  Looked: the
+   September 2 visits are bright time, sky 12,800 ADU on every
+   detector against 4,300 on a good visit (visit_summary skyBg);
+   the far cloud against that sky is noise and the joint fit runs
+   to the bound.  A galaxy near detector 90 of 2025090200293 is a
+   local feature, not the cause.  A cut on skyBg would be the
+   physical criterion (`skytest/failed-visits/`: detector-90 FITS
+   of three failed and one good z visit, and focal-plane mosaics
+   from `scripts/visit_mosaic.py`).  The mosaic of 2025090200293
+   shows stray light, not moonlight: the sky runs from 11,100 nJy
+   in the north to 16,600 in the south-east corner, 40 percent
+   across the field, in broad diagonal bands crossing the
+   detectors (the user: a local light source in the dome); the
+   good visit 2025060900547 spans 3,600-3,900, 8 percent.  The
+   visit is an input to the DP2 z coadd of tract 7275 (375 of the
+   484 cells of patch 0), so such exposures do reach the coadds;
+   the visit summary's skyBg (12,800 against 4,300 ADU) flags them.
+   Transfer check of the r and z wings (delivered-coadd joint fit
+   on the 12-tract sample; 956 r and 837 z patches exist in DP2):
+   real-star residual G 6-13 at 55 / 105 / 205 / 305 / 455 px within
+   +-3 x 10^-3 sigma on every z tract (errors +-1-2) and on 7 of 9 r
+   tracts; r shows +7 +- 3 at 105 px on 9812 and +11 +- 4 at 205 px
+   on 2558 (32 stars), and 10804 is noisy in every band.  One wing
+   per band transfers for r and z as it did for i.
 
 8. **Integration and validation.**  The per-input response is
    computed once per visit-detector (~40 s on slurm) and stored as a
