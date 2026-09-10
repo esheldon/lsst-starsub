@@ -19,6 +19,8 @@ RENDER_GMAX = 16.0
 # render each star out to where its wing drops below this (ADU)
 RENDER_EPS = 0.02
 RENDER_RMAX = 3000.0
+# rows per block when rendering a star's window
+RENDER_BLOCK = 256
 # the junction between the stack profile and the analytic halo
 # (extend_template_halo's r_blend, r_join)
 R_BLEND = 40.0
@@ -115,8 +117,16 @@ def render_wing_image(shape, x, y, gmag, rt, k_in, calib,
         y0, y1 = max(0, iy - m), min(ny, iy + m + 1)
         if x1 <= x0 or y1 <= y0:
             continue
-        gy, gx = np.mgrid[y0:y1, x0:x1]
-        rr = np.hypot(gy - yk, gx - xk)
-        image[y0:y1, x0:x1] += np.interp(rr, r, prof, right=0.0).astype('f4')
+        # the window in blocks of rows: the radii and the
+        # interpolated profile are double precision, and the
+        # window of the brightest stars is the whole image
+        dx = np.arange(x0, x1, dtype='f8') - xk
+        dy = np.arange(y0, y1, dtype='f8') - yk
+        for r0 in range(0, dy.size, RENDER_BLOCK):
+            r1 = min(dy.size, r0 + RENDER_BLOCK)
+            rr = np.hypot(dy[r0:r1, None], dx[None, :])
+            image[y0 + r0:y0 + r1, x0:x1] += np.interp(
+                rr, r, prof, right=0.0,
+            ).astype('f4')
         n += 1
     return image, n

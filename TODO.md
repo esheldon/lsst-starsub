@@ -980,6 +980,37 @@ template job per detector of the 28 visits, `extracts-{visit}/`).
    stars, so a survey-scale run is needed to see the collar-level
    (10^-3 sigma) differences from the residual tests.
 
+7h. **Memory of the joint route** (2026-09-10, for the NERSC nodes:
+   128 patches per node).  The shear-test patches peaked at 2.9 GB
+   (joint) against 2.05 GB (template).  Profiled with tracemalloc
+   and an RSS sampler (scratch `memprof_joint.py`,
+   `rss_timeline.py`): both routes peak in the third band's star
+   stage, on top of the loaded coadds; the joint fit added 0.97 GB
+   of numpy peak over its entry, nearly all transients on the
+   3300x3300 patch: the full-resolution mesh render in double
+   precision (245 MB), the wing render of the whole-patch stars
+   through np.mgrid (270 MB), and the pass-1 sky, star model and
+   residual images kept alive in double precision across pass 2.
+   Fixed in lsst_starsub only: `render_mesh` renders blocks of rows
+   into a single-precision image; `render_wing_image` uses 1-d
+   offsets and blocks of rows; the pass-1 residual is built in one
+   f4 array and freed after the segmentation; the sparse blocks are
+   dropped after stacking; the sky and star model are subtracted in
+   place.  The fit's numpy peak is 0.80 GB over the baseline
+   instead of 1.31; amplitudes and star mask identical, image
+   differences at f4 rounding (rms 1.5 x 10^-4 nJy).  Two-cell
+   pipeline peak 2.25 -> 1.94 GB, level with the template route
+   (1.93).  Full patch 55 with metadetection, RSS sampled every
+   0.5 s: peak 1.88 GB, in the z-band star stage at 26 s; the
+   metadetection stage stays at 1.3-1.5 GB (31.6 min).  The
+   shear-test joint patches had 2.9 GB by /usr/bin/time, so the
+   kernel-counted peak of the same run is being checked.  Numba
+   would take at most ~0.3 GB more out of the fit (the design
+   matrix, the cell binning) and ~3 s per band of its ~9 s (sep's
+   segmentation is 5 s and already C); not worth it: the process
+   peak is set by the loaded coadds plus the star stage of the
+   third band in both routes.
+
 8. **Integration and validation.**  The per-input response is
    computed once per visit-detector (~40 s on slurm) and stored as a
    small coarse array; the coadd stage sums stored arrays per cell;

@@ -27,6 +27,7 @@ EPS = 0.005      # nJy: each star's column extends to where it falls below
 MIN_CELL_FRAC = 0.5
 NPASS = 2
 SEG_GROW = 4     # px: the deep segmentation's footprints are grown by this
+RENDER_BLOCK = 256  # rows per block when rendering the mesh
 PRIOR_SIGMA = 0.3   # the amplitude prior about the prediction (A = 1):
                     # the colour scatter of the i-band to Gaia G flux
                     # ratio; isolated stars are constrained 10x better
@@ -117,11 +118,18 @@ def mesh_columns(cy, cx, shape, spacing):
     return H, (xn, yn)
 
 
-def render_mesh(nodes, values, shape):
+def render_mesh(nodes, values, shape, block=RENDER_BLOCK):
     """
     Render the bilinear mesh at full resolution.
 
-    The bilinear mesh at full resolution
+    Separable bilinear weights: each row blends two node rows,
+    then the columns blend two node columns.  Rendered in blocks
+    of rows into a single-precision image, so the transient
+    double-precision arrays are a block, not the image.
+
+    Returns
+    -------
+    array (ny, nx) f4
     """
     xn, yn = nodes
     vals = np.asarray(values, dtype='f8').reshape(yn.size, xn.size)
@@ -133,12 +141,14 @@ def render_mesh(nodes, values, shape):
     iy = np.clip((ys // spacing).astype(int), 0, yn.size - 2)
     fx = (xs - xn[ix]) / spacing
     fy = (ys - yn[iy]) / spacing
-    # separable bilinear weights: rows blend two node rows, then
-    # columns blend two node columns
-    top = vals[iy]                       # (ny, nxn)
-    bot = vals[iy + 1]
-    rows = (1 - fy)[:, None] * top + fy[:, None] * bot
-    out = (1 - fx)[None, :] * rows[:, ix] + fx[None, :] * rows[:, ix + 1]
+    wx0 = (1 - fx)[None, :]
+    wx1 = fx[None, :]
+    out = np.empty((ny, nx), dtype='f4')
+    for y0 in range(0, ny, block):
+        y1 = min(ny, y0 + block)
+        fyb = fy[y0:y1, None]
+        rows = (1 - fyb) * vals[iy[y0:y1]] + fyb * vals[iy[y0:y1] + 1]
+        out[y0:y1] = wx0 * rows[:, ix] + wx1 * rows[:, ix + 1]
     return out
 
 
@@ -230,9 +240,13 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
 
     # the pinned stars' prediction, subtracted from the data
     pinned = stars[~free]
-    fixed = render_canonical_stars(image.shape, pinned, canonical, gsub=99.0) \
-        if pinned.size else np.zeros(image.shape, dtype='f4')
-    work = image - fixed
+    if pinned.size:
+        work = render_canonical_stars(
+            image.shape, pinned, canonical, gsub=99.0,
+        )
+        np.subtract(image, work, out=work)
+    else:
+        work = image.astype('f4')
 
     # the columns of the free stars at the cell centers
     ncell = cy.size
@@ -249,6 +263,7 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
     )
     H, nodes = mesh_columns(cy, cx, image.shape, spacing)
     X = sparse.hstack([P, H]).tocsr()
+    del P, H, rows, cols, vals
 
     # first flattening for the segmentation: the mesh alone on
     # the good pixels
@@ -296,18 +311,22 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
                              if free[si]))
         if ipass == npass - 1:
             break
-        # re-segment the full-resolution residual
-        sky_full = render_mesh(nodes, node_values, image.shape)
-        model_full = render_canonical_stars(
+        # re-segment the full-resolution residual; the sky and the
+        # star model are rendered into one residual image, freed
+        # once the segmentation has it
+        resid = render_mesh(nodes, node_values, image.shape)
+        np.subtract(image, resid, out=resid)
+        resid -= render_canonical_stars(
             image.shape, stars, canonical, gsub=99.0, amps=A, verbose=False,
         )
-        resid = image - sky_full - model_full
         seg_excl = deep_segmentation(resid, good, sky_sigma)
+        del resid
         if verbose:
             print(f'    segmentation excludes {seg_excl[good].mean() * 100:.1f} '
                   f'percent of the good pixels')
 
-    sky_full = render_mesh(nodes, node_values, image.shape).astype('f4')
+    del work
+    sky_full = render_mesh(nodes, node_values, image.shape)
     model_full = render_canonical_stars(
         image.shape, stars, canonical, gsub=99.0, amps=A, verbose=False,
     )

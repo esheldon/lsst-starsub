@@ -103,7 +103,8 @@ def handle_stars_joint(deep_coadd, wcs, gaia, wing, gsub=None,
         prior_sigma=PRIOR_SIGMA if prior is None else prior,
         variance=var, verbose=verbose,
     )
-    image[:, :] -= (jf['sky'] + jf['star_model']).astype(image.dtype)
+    image -= jf['sky']
+    image -= jf['star_model']
     star_table = make_star_table(stars, [])
     star_table['A'] = jf['A']
     if verbose:
