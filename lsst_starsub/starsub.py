@@ -106,7 +106,8 @@ def handle_stars_joint(deep_coadd, wcs, gaia, wing, gsub=None,
     mask0 = deep_coadd.mask.array[:, :, 0]
     x, y = gaia_pixel_positions(gaia, wcs, deep_coadd.bbox)
     stars = select_stars(gaia, x, y, mask0, gsub=gsub)
-    starmask, _ = build_star_mask(stars, mask0, verbose=verbose)
+    starmask, _ = build_star_mask(stars, mask0, verbose=verbose,
+                                  coadd=True)
     dstar = ndimage.distance_transform_edt(~starmask)
 
     apply = getattr(deep_coadd, 'apply_background', None)

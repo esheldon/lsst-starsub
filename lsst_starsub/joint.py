@@ -11,8 +11,14 @@ the bad pixels, binned BIN x BIN (the wing is smooth on that
 scale, the cores are masked anyway).  Stars off the image or
 fainter than gfit are pinned to the prediction (their wing on the
 image is a plane, degenerate with the sky) and subtracted first.
-A second pass re-segments the residual of the first, so sources
-the initial flattening missed are out of the fit.
+The first pass fits without a source mask; the second fits
+outside the sources segmented on the image minus the first pass's
+star model.  The first pass's sky is deliberately not subtracted
+before segmenting: under a bright galaxy it rises with the
+galaxy's outer light, which would then fall below threshold and
+stay in the sky fit, digging a dark halo (09813-00033, 2026-09-11).
+The star model is subtracted so the wings outside the star masks,
+which constrain the amplitudes, are not masked.
 
 No exclusion zone and no interpolation: the toy fits showed this
 reaches the noise floor at the mask edge where the sequential
@@ -336,14 +342,12 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
                              if free[si]))
         if ipass == npass - 1:
             break
-        # re-segment the full-resolution residual; the sky and the
-        # star model are rendered into one residual image, freed
-        # once the segmentation has it
-        resid = render_mesh(nodes, node_values, image.shape)
-        np.subtract(image, resid, out=resid)
-        resid -= render_canonical_stars(
+        # segment the full-resolution image minus the star model,
+        # but not minus this pass's sky (see the module docstring)
+        resid = render_canonical_stars(
             image.shape, stars, canonical, gsub=99.0, amps=A, verbose=False,
         )
+        np.subtract(image, resid, out=resid)
         seg_excl = deep_segmentation(resid, good, sky_sigma)
         del resid
         if verbose:
