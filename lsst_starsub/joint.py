@@ -33,6 +33,36 @@ EPS = 0.005      # nJy: each star's column extends to where it falls below
 MIN_CELL_FRAC = 0.5
 NPASS = 2
 SEG_GROW = 4     # px: the deep segmentation's footprints are grown by this
+# large sources also get an elliptical mask: a big galaxy's wing beyond
+# its isophote still lifts the sky mesh under it (a dark halo).  The
+# ellipse reaches the isophotal radius plus SEG_BIG_K rms sizes (sep's
+# a).  For an exponential profile the wing falls from the threshold t to
+# eps over ln(t/eps) scale lengths, K ~ 2; heavier wings need more, so K
+# is calibrated on the halo sim (2026-09-11: K = 4 above 3000 px removes
+# ~60% of the halo under bright ellipticals for +7 percentage points of
+# masked area; smaller area thresholds also grow ordinary galaxies).
+# Read at call time
+SEG_BIG_NPIX = 3000   # px: isophotal area from which the growth applies
+SEG_BIG_K = 4.0
+# px: cap on the ellipse's semi-major axis.  650 reaches the giant
+# elliptical of 09224-00089 (617 px uncapped); with 300 its envelope
+# stayed in the sky fit (a dark ring; 3x the halo of 650 in the sim).
+# A cap this large needs the mesh prior: with the ridge alone the
+# masked nodes ran away (2026-09-11)
+SEG_BIG_RMAX = 650.0
+# the sky mesh can be tied together: a penalty (v_i - v_j)^2 /
+# (MESH_SMOOTH_DELTA sky_sigma)^2 on each pair of neighbouring node
+# values, so a node with little data of its own (under a large source
+# or star mask, where the cells left sit at the edge of its hat) follows
+# its neighbours instead of extrapolating from those cells.  A constant
+# sky costs nothing, so the level is not pulled (the ridge pulls to
+# zero).  Neighbouring well-supported nodes differ by 0.08-0.11 sky
+# sigma (8 patches, 2026-09-11).  0.1 fixes the ridge's outlier nodes
+# under large star masks (04777-00069: -4.5 sigma, 10x its error) and
+# leaves the star residuals as they were; stiffer (0.03) loses real
+# structure (halo sim, 2026-09-11).  None: the ridge alone.  Read at
+# call time
+MESH_SMOOTH_DELTA = 0.1
 RENDER_BLOCK = 256  # rows per block when rendering the mesh
 PIXSTACK = int(2e6)      # sep's pixel stack for the segmentation, entries
 PIXSTACK_MAX = int(3.2e7)  # grown by 4 on overflow up to this
@@ -54,7 +84,9 @@ def deep_segmentation(image, good, sig, grow=SEG_GROW):
     noise, minarea 4) as a mask of the sources, grown by `grow`
     px; twice the area of the 1.5 sigma per-pixel segmentation
     and 40 percent less of the faint-source light left in the
-    sky (visit detectors 044 and 004, 2026-09-09)
+    sky (visit detectors 044 and 004, 2026-09-09).  Large sources
+    are further masked out to an ellipse set by their size
+    (grow_big_sources)
     """
     import sep
     from scipy import ndimage
@@ -76,7 +108,7 @@ def deep_segmentation(image, good, sig, grow=SEG_GROW):
         while True:
             sep.set_extract_pixstack(stack)
             try:
-                _, seg = sep.extract(
+                objs, seg = sep.extract(
                     imf, DETECT_SETTINGS['thresh'], err=sig, mask=~good,
                     segmentation_map=True, filter_kernel=kernel,
                     filter_type='conv', minarea=DETECT_SETTINGS['minarea'],
@@ -96,7 +128,34 @@ def deep_segmentation(image, good, sig, grow=SEG_GROW):
     det = seg > 0
     if grow > 0:
         det = ndimage.binary_dilation(det, iterations=int(grow))
+    grow_big_sources(det, objs)
     return det
+
+
+def grow_big_sources(det, objs):
+    """
+    Add, in place, an ellipse around each source of isophotal area at
+    least SEG_BIG_NPIX: orientation and axis ratio from its moments,
+    reaching its isophotal radius plus SEG_BIG_K rms sizes along the
+    major axis, capped at SEG_BIG_RMAX
+
+    Parameters
+    ----------
+    det: bool array
+        The source mask, modified in place
+    objs: structured array
+        The sep.extract object table
+    """
+    import sep
+
+    big = objs[objs['npix'] >= SEG_BIG_NPIX]
+    if big.size == 0 or SEG_BIG_K <= 0:
+        return
+    a = np.maximum(big['a'], 1.0)
+    b = np.maximum(big['b'], 1.0)
+    riso = np.sqrt(big['npix'] / np.pi)
+    scale = np.minimum(riso / a + SEG_BIG_K, SEG_BIG_RMAX / a)
+    sep.mask_ellipse(det, big['x'], big['y'], a, b, big['theta'], r=scale)
 
 
 def binned_cells(image, ok, b=BIN):
@@ -147,6 +206,28 @@ def mesh_columns(cy, cx, shape, spacing):
         shape=(ncell, nxn * nyn),
     )
     return H, (xn, yn)
+
+
+def mesh_difference_matrix(nodes):
+    """
+    First differences of neighbouring mesh nodes.
+
+    A sparse (npair, nnode) matrix, one row per horizontally or
+    vertically adjacent node pair, in the node order of
+    mesh_columns
+    """
+    from scipy import sparse
+
+    xn, yn = nodes
+    idx = np.arange(xn.size * yn.size).reshape(yn.size, xn.size)
+    a = np.concatenate([idx[:, :-1].ravel(), idx[:-1, :].ravel()])
+    b = np.concatenate([idx[:, 1:].ravel(), idx[1:, :].ravel()])
+    rows = np.arange(a.size)
+    return sparse.csr_matrix(
+        (np.concatenate([np.ones(a.size), -np.ones(a.size)]),
+         (np.concatenate([rows, rows]), np.concatenate([a, b]))),
+        shape=(a.size, idx.size),
+    )
 
 
 def render_mesh(nodes, values, shape, block=RENDER_BLOCK):
@@ -243,7 +324,8 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
     -------
     dict with A (per census star; 1 where pinned), free (bool per
     star), sky (full res), star_model (full res), nodes, node
-    values, ncell, chi2 per cell
+    values, node_err (their 1 sigma, priors included), ncell, chi2
+    per cell
     """
     from scipy import sparse
     from .visit import render_canonical_stars
@@ -296,6 +378,13 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
     X = sparse.hstack([P, H]).tocsr()
     del P, H, rows, cols, vals
 
+    # the smoothness prior on the mesh (MESH_SMOOTH_DELTA) in the
+    # units of F, chi2 x sky_sigma^2: 1 / delta^2 per pair
+    smooth = None
+    if MESH_SMOOTH_DELTA is not None:
+        D = mesh_difference_matrix(nodes)
+        smooth = (D.T @ D).toarray() / MESH_SMOOTH_DELTA ** 2
+
     # first flattening for the segmentation: the mesh alone on
     # the good pixels
     seg_excl = np.zeros(image.shape, dtype=bool)
@@ -312,6 +401,8 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
         rhs = X.T @ (w * mean.ravel())
         # a tiny ridge on the mesh keeps unsupported nodes finite
         F[nfree:, nfree:] += np.eye(F.shape[0] - nfree) * 1e-6 * w.sum() / ncell
+        if smooth is not None:
+            F[nfree:, nfree:] += smooth
         # and on the amplitudes, at a level far below any star's
         # own information (a star losing its cells to the pass-2
         # segmentation would otherwise make F singular)
@@ -355,11 +446,16 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
                   f'percent of the good pixels')
 
     del work
+    # the node uncertainties, sky_sigma^2 F^-1 with the priors in
+    # (white noise: the coadd's correlated noise makes them lower
+    # bounds)
+    cov = np.diag(np.linalg.inv(F))[nfree:]
+    node_err = sky_sigma * np.sqrt(np.maximum(cov, 0.0))
     sky_full = render_mesh(nodes, node_values, image.shape)
     model_full = render_canonical_stars(
         image.shape, stars, canonical, gsub=99.0, amps=A, verbose=False,
     )
     return dict(
         A=A, free=free, sky=sky_full, star_model=model_full, nodes=nodes,
-        node_values=node_values, ncell=ncell, chi2=chi2,
+        node_values=node_values, node_err=node_err, ncell=ncell, chi2=chi2,
     )
