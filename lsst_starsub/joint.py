@@ -304,7 +304,10 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
     Parameters
     ----------
     image: array (nJy)
-        The input state (sky in, stars in)
+        The input state: stars in, and the sky the mesh is to model
+        not yet subtracted (for a coadd, the image with only the
+        background determined without object masking subtracted;
+        see starsub.handle_stars_joint)
     good: bool array
         Pixels usable for the fit: not bad, not in a star mask
     stars: structured array

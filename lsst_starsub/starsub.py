@@ -51,10 +51,12 @@ def handle_stars_joint(deep_coadd, wcs, gaia, wing, gsub=None,
     """
     Subtract the stars and the sky of a patch coadd with the joint fit.
 
-    The stored object background is restored first, so the image holds
-    the whole sky and the mesh replaces the background model; then the
-    sky mesh and the star model are subtracted in place.  Returns what
-    lsst_mdet.starsub.handle_stars returns, plus the fit.
+    The stored 'object' background is undone first
+    (apply_background(None)), leaving the image with only the initial
+    background subtracted, the one determined without masking
+    objects; the mesh then takes the place of the 'object' model.
+    The sky mesh and the star model are subtracted in place.  Returns
+    what lsst_mdet.starsub.handle_stars returns, plus the fit.
 
     Parameters
     ----------
