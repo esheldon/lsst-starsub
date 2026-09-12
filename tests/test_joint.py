@@ -51,3 +51,32 @@ def test_smooth_fills_empty_node(monkeypatch):
     ridge_value, ridge_err = _plane_fit(None, monkeypatch)
     # the ridge alone leaves the node unconstrained
     assert ridge_err > 10 * err
+
+
+def _filament_image():
+    """noise, a faint wide filament (diffuse) with a bright galaxy on
+    it, and a bright galaxy away from it"""
+    rng = np.random.RandomState(7)
+    n = 900
+    yy, xx = np.mgrid[:n, :n]
+    img = rng.normal(size=(n, n))
+    img += 1.6 * np.exp(-0.5 * ((yy - 0.3 * xx - 400) / 40.0) ** 2)
+    img += 200 * np.exp(-np.hypot(xx - 450, yy - 535) / 5.0)   # on it
+    img += 200 * np.exp(-np.hypot(xx - 200, yy - 150) / 5.0)   # off it
+    return img
+
+
+def test_diffuse_segments_left_to_sky(monkeypatch):
+    img = _filament_image()
+    good = np.ones(img.shape, dtype=bool)
+    ridge = (int(0.3 * 750 + 400), 750)     # (row, col) on the filament
+
+    monkeypatch.setattr(jmod, 'SEG_DIFFUSE_MEDIAN', None)
+    det = jmod.deep_segmentation(img, good, 1.0)
+    assert det[ridge]
+
+    monkeypatch.setattr(jmod, 'SEG_DIFFUSE_MEDIAN', 1.6)
+    det = jmod.deep_segmentation(img, good, 1.0)
+    # the filament is left to the sky fit, both galaxies stay masked
+    assert not det[ridge]
+    assert det[535, 450] and det[150, 200]

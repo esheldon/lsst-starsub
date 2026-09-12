@@ -63,6 +63,18 @@ SEG_BIG_RMAX = 650.0
 # structure (halo sim, 2026-09-11).  None: the ridge alone.  Read at
 # call time
 MESH_SMOOTH_DELTA = 0.1
+# large segments of diffuse emission (cirrus): a segment of at least
+# SEG_BIG_NPIX px whose median pixel value is below SEG_DIFFUSE_MEDIAN
+# sky sigma is left out of the source mask, so the mesh fits it as sky,
+# and is not grown; the compact sources inside it are found again above
+# a local background of SEG_DIFFUSE_BW px boxes, which takes out the
+# diffuse light, and stay masked (sep merges everything connected, so
+# without this every galaxy on cirrus would lift the mesh).  Cirrus
+# medians are 1.2-1.4, galaxies >= 2.0 sky sigma (the large r-band
+# segments of 37 patches, 2026-09-12).  None: off, every segment is a
+# source.  Read at call time
+SEG_DIFFUSE_MEDIAN = None
+SEG_DIFFUSE_BW = 32   # px
 RENDER_BLOCK = 256  # rows per block when rendering the mesh
 PIXSTACK = int(2e6)      # sep's pixel stack for the segmentation, entries
 PIXSTACK_MAX = int(3.2e7)  # grown by 4 on overflow up to this
@@ -86,14 +98,36 @@ def deep_segmentation(image, good, sig, grow=SEG_GROW):
     and 40 percent less of the faint-source light left in the
     sky (visit detectors 044 and 004, 2026-09-09).  Large sources
     are further masked out to an ellipse set by their size
-    (grow_big_sources)
+    (grow_big_sources); large diffuse segments are left to the sky
+    fit when SEG_DIFFUSE_MEDIAN is set (diffuse_segments)
+    """
+    from scipy import ndimage
+
+    imf = np.ascontiguousarray(image, dtype='f4')
+    objs, seg = _extract(imf, sig, ~good)
+    det = seg > 0
+    diffuse = diffuse_segments(imf, seg, objs, sig)
+    if diffuse.size:
+        region = np.isin(seg, diffuse)
+        det &= ~region
+        det |= compact_in_diffuse(imf, good & region, sig)
+        objs = np.delete(objs, diffuse - 1)
+        print(f'    {diffuse.size} diffuse segments left to the sky fit '
+              f'({region[good].mean() * 100:.1f} percent of the good '
+              f'pixels)')
+    if grow > 0:
+        det = ndimage.binary_dilation(det, iterations=int(grow))
+    grow_big_sources(det, objs)
+    return det
+
+
+def _extract(imf, sig, mask):
+    """
+    sep.extract with the metadetection detection settings and no
+    deblending; returns the object table and segmentation map
     """
     import sep
-    from scipy import ndimage
     from lsst_mdet.detect import DETECT_SETTINGS, make_kernel
-
-    kernel = make_kernel()
-    imf = np.ascontiguousarray(image, dtype='f4')
 
     # sep's pixel stack is process-global and touched in full on
     # every extract call (41 bytes per entry: 2e7 entries cost
@@ -108,13 +142,12 @@ def deep_segmentation(image, good, sig, grow=SEG_GROW):
         while True:
             sep.set_extract_pixstack(stack)
             try:
-                objs, seg = sep.extract(
-                    imf, DETECT_SETTINGS['thresh'], err=sig, mask=~good,
-                    segmentation_map=True, filter_kernel=kernel,
+                return sep.extract(
+                    imf, DETECT_SETTINGS['thresh'], err=sig, mask=mask,
+                    segmentation_map=True, filter_kernel=make_kernel(),
                     filter_type='conv', minarea=DETECT_SETTINGS['minarea'],
                     deblend_nthresh=1, deblend_cont=1.0,
                 )
-                break
             except Exception as err:
                 if 'pixel buffer full' not in str(err) \
                         or stack >= PIXSTACK_MAX:
@@ -125,11 +158,46 @@ def deep_segmentation(image, good, sig, grow=SEG_GROW):
     finally:
         sep.set_extract_pixstack(old_stack)
         sep.set_sub_object_limit(old_sub)
-    det = seg > 0
-    if grow > 0:
-        det = ndimage.binary_dilation(det, iterations=int(grow))
-    grow_big_sources(det, objs)
-    return det
+
+
+def diffuse_segments(imf, seg, objs, sig):
+    """
+    The labels of the large segments of diffuse emission.
+
+    Segments of at least SEG_BIG_NPIX px whose median pixel value is
+    below SEG_DIFFUSE_MEDIAN sky sigma; none when that is None
+    """
+    if SEG_DIFFUSE_MEDIAN is None:
+        return np.zeros(0, dtype=int)
+    ids = np.flatnonzero(objs['npix'] >= SEG_BIG_NPIX) + 1
+    if ids.size == 0:
+        return ids
+    # the pixels of each large segment, sorted by label once
+    sel = np.isin(seg, ids)
+    lab, val = seg[sel], imf[sel]
+    order = np.argsort(lab, kind='stable')
+    lab, val = lab[order], val[order]
+    bounds = np.searchsorted(lab, np.append(ids, ids[-1] + 1))
+    med = np.array([np.median(val[bounds[k]:bounds[k + 1]])
+                    for k in range(ids.size)])
+    return ids[med < SEG_DIFFUSE_MEDIAN * sig]
+
+
+def compact_in_diffuse(imf, region, sig):
+    """
+    The compact sources inside the diffuse segments.
+
+    Detected with the same settings above a local background of
+    SEG_DIFFUSE_BW px boxes estimated on the region, which takes out
+    the diffuse light; returns their mask
+    """
+    import sep
+
+    bkg = sep.Background(imf, mask=~region, bw=SEG_DIFFUSE_BW,
+                         bh=SEG_DIFFUSE_BW, fw=3, fh=3)
+    resid = np.ascontiguousarray(imf - bkg.back(), dtype='f4')
+    _, seg = _extract(resid, sig, ~region)
+    return seg > 0
 
 
 def grow_big_sources(det, objs):
