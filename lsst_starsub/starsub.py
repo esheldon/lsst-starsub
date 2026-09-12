@@ -88,7 +88,9 @@ def handle_stars_joint(deep_coadd, wcs, gaia, wing, gsub=None,
         transform off the mask, and the fit dict: the census
         (stars), A, free, nodes, node_values, spacing, prior, gfit,
         gsub, chi2, ncell, sky_sigma, shape, bg_restored and the
-        wing, for make_fit_tables
+        wing, for make_fit_tables; and diffuse, the bool mask of the
+        large diffuse segments left to the sky fit (joint_fit), for
+        the caller to mask
     """
     from scipy import ndimage
     from lsst_mdet.defaults import DM_NO_DATA
@@ -158,6 +160,7 @@ def handle_stars_joint(deep_coadd, wcs, gaia, wing, gsub=None,
         shape=image.shape,
         bg_restored=bg_restored,
         wing=wing,
+        diffuse=jf['diffuse'],
     )
     return starmask, star_table, dstar, fit
 

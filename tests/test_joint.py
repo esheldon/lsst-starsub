@@ -76,7 +76,31 @@ def test_diffuse_segments_left_to_sky(monkeypatch):
     assert det[ridge]
 
     monkeypatch.setattr(jmod, 'SEG_DIFFUSE_MEDIAN', 1.6)
-    det = jmod.deep_segmentation(img, good, 1.0)
+    det, region = jmod.deep_segmentation(img, good, 1.0, return_diffuse=True)
     # the filament is left to the sky fit, both galaxies stay masked
     assert not det[ridge]
     assert det[535, 450] and det[150, 200]
+    # and returned as the diffuse region, the galaxy on it included
+    assert region[ridge] and region[535, 450] and not region[150, 200]
+
+
+def test_joint_fit_returns_diffuse(monkeypatch):
+    img = _filament_image()
+    r = np.arange(60.0)
+    canonical = (r, 3e7 * np.exp(-r / 4.0))
+    stars = np.zeros(1, dtype=[('x', 'f8'), ('y', 'f8'), ('G', 'f4')])
+    stars['x'], stars['y'], stars['G'] = 800.0, 100.0, 16.0
+    img += render_canonical_stars(img.shape, stars, canonical, gsub=99.0,
+                                  verbose=False)
+    good = np.ones(img.shape, dtype=bool)
+    ridge = (int(0.3 * 750 + 400), 750)
+
+    monkeypatch.setattr(jmod, 'SEG_DIFFUSE_MEDIAN', 1.6)
+    jf = jmod.joint_fit(img, good, stars, canonical, 1.0, spacing=128,
+                        verbose=False)
+    assert jf['diffuse'][ridge] and not jf['diffuse'][150, 200]
+
+    monkeypatch.setattr(jmod, 'SEG_DIFFUSE_MEDIAN', None)
+    jf = jmod.joint_fit(img, good, stars, canonical, 1.0, spacing=128,
+                        verbose=False)
+    assert not jf['diffuse'].any()

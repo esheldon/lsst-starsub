@@ -1,5 +1,5 @@
 """
-the joint fit of the star amplitudes and the sky (TODO step 7c)
+The joint fit of the star amplitudes and the sky (TODO step 7c).
 
     image = sum_k A_k F_k P(r - r_k) + S(x) + noise
 
@@ -71,9 +71,14 @@ MESH_SMOOTH_DELTA = 0.1
 # diffuse light, and stay masked (sep merges everything connected, so
 # without this every galaxy on cirrus would lift the mesh).  Cirrus
 # medians are 1.2-1.4, galaxies >= 2.0 sky sigma (the large r-band
-# segments of 37 patches, 2026-09-12).  None: off, every segment is a
-# source.  Read at call time
-SEG_DIFFUSE_MEDIAN = None
+# segments of 37 patches, 2026-09-12).  Of the treatments in the cirrus
+# injection test (run-dp2-test-cirrus-inject, 2026-09-12) this gave the
+# best colours on and near the cirrus, no excess detections near it and
+# the shortest run times; masked and grown, its faint surroundings stay
+# in the image.  Faint objects on the cirrus are still biased (-0.11 in
+# r-i at S/N 10-20), so joint_fit returns the region for masking.
+# None: off, every segment is a source.  Read at call time
+SEG_DIFFUSE_MEDIAN = 1.6
 SEG_DIFFUSE_BW = 32   # px
 RENDER_BLOCK = 256  # rows per block when rendering the mesh
 PIXSTACK = int(2e6)      # sep's pixel stack for the segmentation, entries
@@ -87,7 +92,7 @@ PRIOR_SIGMA = 0.3   # the amplitude prior about the prediction (A = 1):
                     # without it, pass 1 of the broad calibration)
 
 
-def deep_segmentation(image, good, sig, grow=SEG_GROW):
+def deep_segmentation(image, good, sig, grow=SEG_GROW, return_diffuse=False):
     """
     Segment the sources with the metadetection detection settings.
 
@@ -99,7 +104,28 @@ def deep_segmentation(image, good, sig, grow=SEG_GROW):
     sky (visit detectors 044 and 004, 2026-09-09).  Large sources
     are further masked out to an ellipse set by their size
     (grow_big_sources); large diffuse segments are left to the sky
-    fit when SEG_DIFFUSE_MEDIAN is set (diffuse_segments)
+    fit when SEG_DIFFUSE_MEDIAN is set (diffuse_segments).
+
+    Parameters
+    ----------
+    image: array
+        The image to segment
+    good: bool array
+        The usable pixels; the rest are masked in the extraction
+    sig: float
+        The per-pixel sky noise (sep's err)
+    grow: int, optional
+        Px by which the source footprints are grown; default SEG_GROW
+    return_diffuse: bool, optional
+        Also return the mask of the diffuse segments
+
+    Returns
+    -------
+    det: bool array
+        The source mask
+    region: bool array
+        With return_diffuse only: the diffuse segments left to the
+        sky fit (none when SEG_DIFFUSE_MEDIAN is None)
     """
     from scipy import ndimage
 
@@ -107,6 +133,7 @@ def deep_segmentation(image, good, sig, grow=SEG_GROW):
     objs, seg = _extract(imf, sig, ~good)
     det = seg > 0
     diffuse = diffuse_segments(imf, seg, objs, sig)
+    region = np.zeros(det.shape, dtype=bool)
     if diffuse.size:
         region = np.isin(seg, diffuse)
         det &= ~region
@@ -118,13 +145,33 @@ def deep_segmentation(image, good, sig, grow=SEG_GROW):
     if grow > 0:
         det = ndimage.binary_dilation(det, iterations=int(grow))
     grow_big_sources(det, objs)
+    if return_diffuse:
+        return det, region
     return det
 
 
 def _extract(imf, sig, mask):
     """
-    sep.extract with the metadetection detection settings and no
-    deblending; returns the object table and segmentation map
+    Run sep.extract with the metadetection detection settings.
+
+    No deblending.  The pixel stack starts at PIXSTACK and grows by 4
+    on overflow up to PIXSTACK_MAX.
+
+    Parameters
+    ----------
+    imf: array
+        The image, contiguous float32
+    sig: float
+        The per-pixel sky noise (sep's err)
+    mask: bool array
+        True for the pixels to ignore
+
+    Returns
+    -------
+    objs: structured array
+        The sep object table
+    seg: int array
+        The segmentation map: label k for objs[k - 1], 0 for none
     """
     import sep
     from lsst_mdet.detect import DETECT_SETTINGS, make_kernel
@@ -162,10 +209,26 @@ def _extract(imf, sig, mask):
 
 def diffuse_segments(imf, seg, objs, sig):
     """
-    The labels of the large segments of diffuse emission.
+    Find the labels of the large segments of diffuse emission.
 
     Segments of at least SEG_BIG_NPIX px whose median pixel value is
-    below SEG_DIFFUSE_MEDIAN sky sigma; none when that is None
+    below SEG_DIFFUSE_MEDIAN sky sigma; none when that is None.
+
+    Parameters
+    ----------
+    imf: array
+        The segmented image
+    seg: int array
+        Its segmentation map (_extract)
+    objs: structured array
+        Its sep object table (_extract)
+    sig: float
+        The per-pixel sky noise
+
+    Returns
+    -------
+    ids: int array
+        The segmentation labels of the diffuse segments
     """
     if SEG_DIFFUSE_MEDIAN is None:
         return np.zeros(0, dtype=int)
@@ -185,11 +248,26 @@ def diffuse_segments(imf, seg, objs, sig):
 
 def compact_in_diffuse(imf, region, sig):
     """
-    The compact sources inside the diffuse segments.
+    Find the compact sources inside the diffuse segments.
 
     Detected with the same settings above a local background of
     SEG_DIFFUSE_BW px boxes estimated on the region, which takes out
-    the diffuse light; returns their mask
+    the diffuse light.
+
+    Parameters
+    ----------
+    imf: array
+        The segmented image
+    region: bool array
+        The usable pixels of the diffuse segments, to which the
+        search is limited
+    sig: float
+        The per-pixel sky noise
+
+    Returns
+    -------
+    compact: bool array
+        The mask of the compact sources
     """
     import sep
 
@@ -202,10 +280,12 @@ def compact_in_diffuse(imf, region, sig):
 
 def grow_big_sources(det, objs):
     """
-    Add, in place, an ellipse around each source of isophotal area at
-    least SEG_BIG_NPIX: orientation and axis ratio from its moments,
-    reaching its isophotal radius plus SEG_BIG_K rms sizes along the
-    major axis, capped at SEG_BIG_RMAX
+    Mask an ellipse around each large source, in place.
+
+    For each source of isophotal area at least SEG_BIG_NPIX: the
+    orientation and axis ratio from its moments, reaching its
+    isophotal radius plus SEG_BIG_K rms sizes along the major axis,
+    capped at SEG_BIG_RMAX.  Nothing when SEG_BIG_K <= 0.
 
     Parameters
     ----------
@@ -230,8 +310,25 @@ def binned_cells(image, ok, b=BIN):
     """
     Bin an image into b x b cells over the usable pixels.
 
-    The means of the ok pixels per b x b cell, the ok counts and
-    the cell centers (pixel coordinates)
+    Rows and columns beyond the last whole cell are dropped.
+
+    Parameters
+    ----------
+    image: array
+        The image
+    ok: bool array
+        The pixels to use
+    b: int, optional
+        The cell side in px; default BIN
+
+    Returns
+    -------
+    mean: array (my, mx)
+        The mean of the ok pixels per cell, 0 where there are none
+    n: int array (my, mx)
+        The number of ok pixels per cell
+    cy, cx: arrays (my, mx)
+        The cell centers, pixel coordinates
     """
     ny, nx = image.shape
     my, mx = ny // b, nx // b
@@ -245,10 +342,29 @@ def binned_cells(image, ok, b=BIN):
 
 def mesh_columns(cy, cx, shape, spacing):
     """
-    Build the bilinear sky-mesh columns at the cell centres.
+    Build the bilinear sky-mesh columns at the cell centers.
 
-    Bilinear hat functions on a node grid covering the image, as
-    a sparse (ncell, nnode) matrix evaluated at the cell centers
+    Bilinear hat functions on a node grid covering the image,
+    evaluated at the cell centers.
+
+    Parameters
+    ----------
+    cy, cx: arrays
+        The cell centers (binned_cells)
+    shape: (ny, nx)
+        The image shape
+    spacing: float
+        The node spacing in px; the nodes run from 0 to at least the
+        image size
+
+    Returns
+    -------
+    H: sparse matrix (ncell, nnode)
+        The hat functions at the cell centers, the cells in the ravel
+        order of cy, cx
+    nodes: (xn, yn)
+        The node coordinates; node k is at (xn[k % xn.size],
+        yn[k // xn.size])
     """
     from scipy import sparse
 
@@ -278,11 +394,20 @@ def mesh_columns(cy, cx, shape, spacing):
 
 def mesh_difference_matrix(nodes):
     """
-    First differences of neighbouring mesh nodes.
+    Build the first differences of neighbouring mesh nodes.
 
-    A sparse (npair, nnode) matrix, one row per horizontally or
-    vertically adjacent node pair, in the node order of
-    mesh_columns
+    One row per horizontally or vertically adjacent node pair: +1 at
+    one node, -1 at the other.
+
+    Parameters
+    ----------
+    nodes: (xn, yn)
+        The node coordinates (mesh_columns)
+
+    Returns
+    -------
+    D: sparse matrix (npair, nnode)
+        The difference operator, in the node order of mesh_columns
     """
     from scipy import sparse
 
@@ -307,9 +432,21 @@ def render_mesh(nodes, values, shape, block=RENDER_BLOCK):
     of rows into a single-precision image, so the transient
     double-precision arrays are a block, not the image.
 
+    Parameters
+    ----------
+    nodes: (xn, yn)
+        The node coordinates (mesh_columns), evenly spaced
+    values: array
+        The node values, in the node order of mesh_columns
+    shape: (ny, nx)
+        The image shape
+    block: int, optional
+        Rows per block; default RENDER_BLOCK
+
     Returns
     -------
-    array (ny, nx) f4
+    sky: array (ny, nx) f4
+        The rendered mesh
     """
     xn, yn = nodes
     vals = np.asarray(values, dtype='f8').reshape(yn.size, xn.size)
@@ -334,11 +471,33 @@ def render_mesh(nodes, values, shape, block=RENDER_BLOCK):
 
 def star_column(cy, cx, x, y, G, canonical, b=BIN, eps=EPS):
     """
-    Evaluate one star's wing at the cell centres of its window.
+    Evaluate one star's wing at the cell centers of its window.
 
-    The star's wing at the cell centers within its window:
-    (cell indices, values) with A = 1 the prediction; canonical
-    is (r, T) or a WingModel (per-star shape)
+    The window reaches the radius where the wing falls below eps;
+    the values are for A = 1, the prediction.
+
+    Parameters
+    ----------
+    cy, cx: arrays (my, mx)
+        The cell centers (binned_cells)
+    x, y: float
+        The star's position, pixels
+    G: float
+        Its Gaia G magnitude
+    canonical: (r, T) or WingModel
+        The wing, nJy per unit Gaia flux at radius r px; a WingModel
+        gives a per-star shape (its profile(G))
+    b: int, optional
+        The cell side in px; default BIN
+    eps: float, optional
+        nJy: the window's edge; default EPS
+
+    Returns
+    -------
+    idx: int array
+        The cells with a nonzero value, flat indices into cy, cx
+    vals: array
+        The wing at those cells
     """
     profile_fn = getattr(canonical, 'profile', None)
     r, T = canonical if profile_fn is None else profile_fn(float(G))
@@ -369,6 +528,12 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
     """
     Fit the star amplitudes and the sky mesh together.
 
+    Weighted least squares on the good pixels binned b x b (see the
+    module docstring), in npass passes: the first without a source
+    mask, each later one outside the sources segmented
+    (deep_segmentation) on the image minus the previous pass's star
+    model.
+
     Parameters
     ----------
     image: array (nJy)
@@ -379,24 +544,43 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
     good: bool array
         Pixels usable for the fit: not bad, not in a star mask
     stars: structured array
-        The census (x, y, G, on_image)
-    canonical: (r, T)
+        The census, with x, y (pixels) and G per star
+    canonical: (r, T) or WingModel
+        The wing (star_column)
     sky_sigma: float
-        For the segmentation threshold
+        The per-pixel sky noise: the segmentation threshold, and the
+        unit of the cell weights, the priors and node_err
+    spacing: float, optional
+        The mesh node spacing in px; default SPACING
+    gfit: float, optional
+        Stars on the image brighter than this G are fit, the rest
+        pinned to the prediction; default GFIT
+    b: int, optional
+        The cell side in px; default BIN
+    npass: int, optional
+        The number of passes; default NPASS
+    eps: float, optional
+        nJy: each star's column extends to where its wing falls
+        below this; default EPS
     variance: array, optional
         Per-pixel variance; the cells are then weighted by their
         good-pixel count over their mean variance (uniform
         variance sky_sigma^2 otherwise)
     prior_sigma: float, optional
         Gaussian prior on each free amplitude about 1, in the
-        cells' chi2 units; None for none
+        cells' chi2 units; None for none.  Default PRIOR_SIGMA
+    verbose: bool, optional
+        Print the per-pass summaries
 
     Returns
     -------
-    dict with A (per census star; 1 where pinned), free (bool per
-    star), sky (full res), star_model (full res), nodes, node
-    values, node_err (their 1 sigma, priors included), ncell, chi2
-    per cell
+    result: dict
+        A (per census star; 1 where pinned), free (bool per star),
+        sky (full res), star_model (full res), nodes, node_values,
+        node_err (their 1 sigma, priors included), ncell, chi2 (per
+        cell), diffuse (full res bool: the large diffuse segments the
+        last segmentation left to the sky fit; none with
+        SEG_DIFFUSE_MEDIAN None or a single pass)
     """
     from scipy import sparse
     from .visit import render_canonical_stars
@@ -459,6 +643,7 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
     # first flattening for the segmentation: the mesh alone on
     # the good pixels
     seg_excl = np.zeros(image.shape, dtype=bool)
+    diffuse = np.zeros(image.shape, dtype=bool)
     A = np.ones(stars.size)
     for ipass in range(npass):
         ok = good & ~seg_excl
@@ -510,7 +695,8 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
             image.shape, stars, canonical, gsub=99.0, amps=A, verbose=False,
         )
         np.subtract(image, resid, out=resid)
-        seg_excl = deep_segmentation(resid, good, sky_sigma)
+        seg_excl, diffuse = deep_segmentation(resid, good, sky_sigma,
+                                              return_diffuse=True)
         del resid
         if verbose:
             print(f'    segmentation excludes {seg_excl[good].mean() * 100:.1f} '
@@ -529,4 +715,5 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
     return dict(
         A=A, free=free, sky=sky_full, star_model=model_full, nodes=nodes,
         node_values=node_values, node_err=node_err, ncell=ncell, chi2=chi2,
+        diffuse=diffuse,
     )
