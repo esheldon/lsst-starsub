@@ -23,6 +23,201 @@ FIT_EXTS = (META_EXT, STARS_EXT, SKY_EXT, WING_EXT)
 # the census columns carried into the stars table
 CENSUS_COLUMNS = ('ra', 'dec', 'x', 'y', 'G', 'ruwe', 'is_sat', 'on_image')
 
+# stars below the census depth (gsub) down to WING_GMAX get only their
+# predicted wing subtracted, tapered in over WING_RIN-WING_ROUT px from
+# the star, and are not masked, so their cores stay in the image for the
+# detection like any star; their measured fluxes and sizes are unchanged
+# (NONPOS_SIZE 76 -> 79 percent of them).  Without it the joint route
+# leaves the light of these wings on nearby galaxies: in the injection
+# test near G 19-21 stars (run-dp2-test-nearstar-inject, 2026-09-13) the
+# typical shear galaxy (i 22.5-23.5) within 60 px came out +2.4, +1.2,
+# +1.7 percent bright in r, i, z, and +1.0, 0.0, +0.5 with it.  The
+# 8-16 px taper leaves the least close in, in typical fields; in crowded
+# ones it over-subtracts by ~1.5 percent at 12-25 px.  The caller must
+# supply the Gaia stars to this depth.  None: off.  Read at call time
+WING_GMAX = 21.0
+WING_RIN = 8.0    # px
+WING_ROUT = 16.0  # px
+# px: with this set, each of those stars' wing amplitude comes from its
+# core in the band (core_amplitudes), not the Gaia prediction, which
+# scatters by ~30 percent with the star's colour: the faint stars are
+# redder than the calibration's, median core amplitudes r 0.87, i 1.2, z
+# 1.6 (2026-09-13).  None: the prediction
+WING_CORE_RAP = 5.0
+# the core amplitudes outside this range (a neighbour in the aperture, a
+# star moved off its Gaia position) fall back to the prediction
+WING_AMP_RANGE = (0.25, 4.0)
+
+
+def wing_taper(r, rin=None, rout=None):
+    """
+    Return the radial taper that keeps a star's wing and drops its core.
+
+    A smooth step, 0 inside rin and 1 beyond rout (the cumulative
+    triweight of lsst_mdet.apodize).
+
+    Parameters
+    ----------
+    r: array
+        Radii in px
+    rin, rout: float, optional
+        The inner and outer radii in px; default WING_RIN, WING_ROUT
+
+    Returns
+    -------
+    taper: array
+    """
+    from lsst_mdet.apodize import taper_from_distance
+
+    rin = WING_RIN if rin is None else rin
+    rout = WING_ROUT if rout is None else rout
+    return taper_from_distance(np.maximum(np.asarray(r) - rin, 0.0),
+                               rout - rin)
+
+
+def wing_only(wing, rin=None, rout=None):
+    """
+    Return the wing model with its core tapered away.
+
+    The profile times wing_taper, for stars whose cores are left in
+    the image.
+
+    Parameters
+    ----------
+    wing: WingModel
+        The full wing model, core included
+    rin, rout: float, optional
+        The taper's inner and outer radii in px; default WING_RIN,
+        WING_ROUT
+
+    Returns
+    -------
+    wing: WingModel
+        The tapered model
+    """
+    from .wing import WingModel
+
+    return WingModel(wing.r, wing.T * wing_taper(wing.r, rin, rout))
+
+
+def core_amplitudes(image, good, x, y, G, wing, rap):
+    """
+    Measure each star's wing amplitude from its core.
+
+    The flux in the pixels within rap px of the star over the model's
+    flux in the same pixels at amplitude 1 (the Gaia prediction).  1
+    where the aperture leaves the image or holds a pixel that is not
+    good, or where the ratio falls outside WING_AMP_RANGE.
+
+    Parameters
+    ----------
+    image: array
+        The image, the sky and the census stars subtracted
+    good: bool array
+        The usable pixels
+    x, y, G: arrays
+        The stars' patch-frame positions and Gaia G
+    wing: WingModel
+        The full wing model, core included
+    rap: float
+        The aperture radius in px
+
+    Returns
+    -------
+    amps: array
+        The amplitudes, 1 the prediction
+    """
+    ny, nx = image.shape
+    m = int(np.ceil(rap)) + 1
+    amps = np.ones(len(x))
+    for k, (xk, yk, gk) in enumerate(zip(x, y, G)):
+        ix, iy = int(round(xk)), int(round(yk))
+        if ix - m < 0 or iy - m < 0 or ix + m >= nx or iy + m >= ny:
+            continue
+        sl = np.s_[iy - m:iy + m + 1, ix - m:ix + m + 1]
+        yy, xx = np.mgrid[iy - m:iy + m + 1, ix - m:ix + m + 1]
+        rr = np.hypot(xx - xk, yy - yk)
+        ap = rr <= rap
+        if not good[sl][ap].all():
+            continue
+        r, T = wing.profile(float(gk))
+        model = 10.0 ** (-0.4 * gk) * np.interp(rr[ap], r, T).sum()
+        a = image[sl][ap].sum() / model
+        if WING_AMP_RANGE[0] <= a <= WING_AMP_RANGE[1]:
+            amps[k] = a
+    return amps
+
+
+def subtract_faint_wings(image, gaia, x, y, wing, gsub, good=None,
+                         verbose=True):
+    """
+    Subtract the predicted wings of the stars below the census depth.
+
+    The on-image stars with gsub <= G < WING_GMAX, with the core
+    tapered away (wing_only), in place; nothing when WING_GMAX is None.
+    The amplitude is the prediction (1, as for the pinned census
+    stars), or with WING_CORE_RAP set each star's own from its core
+    (core_amplitudes).
+
+    Parameters
+    ----------
+    image: array
+        The image, modified in place
+    gaia: array with fields
+        The gaia extract (lsst_mdet.gaia), to WING_GMAX
+    x, y: arrays
+        The stars' patch-frame positions
+    wing: WingModel
+        The full wing model
+    gsub: float
+        The census depth
+    good: bool array, optional
+        The usable pixels, for the core amplitudes; default all
+    verbose: bool, optional
+        Print the number subtracted
+
+    Returns
+    -------
+    nwing: int
+        The number of stars whose wings were subtracted
+    """
+    from .visit import render_canonical_stars
+    from .wing import WingModel
+
+    if WING_GMAX is None or not WING_GMAX > gsub:
+        return 0
+    G = np.asarray(gaia['phot_g_mean_mag'], dtype='f8')
+    ny, nx = image.shape
+    sel = ((G >= gsub) & (G < WING_GMAX)
+           & (x >= 0) & (x < nx) & (y >= 0) & (y < ny))
+    if not sel.any():
+        return 0
+    faint = np.zeros(sel.sum(), dtype=[('x', 'f8'), ('y', 'f8'), ('G', 'f8')])
+    faint['x'], faint['y'], faint['G'] = x[sel], y[sel], G[sel]
+    amps = None
+    if WING_CORE_RAP is not None:
+        if good is None:
+            good = np.ones(image.shape, dtype=bool)
+        amps = core_amplitudes(image, good, faint['x'], faint['y'],
+                               faint['G'], wing, WING_CORE_RAP)
+    # rendered as the full model less its core: the renderer ends each
+    # star's window where the profile first falls below its floor, so a
+    # profile rising from zero, the wing alone, would render nothing
+    core = WingModel(wing.r, wing.T * (1.0 - wing_taper(wing.r)))
+    model = render_canonical_stars(image.shape, faint, wing,
+                                   gsub=WING_GMAX, amps=amps, verbose=False)
+    model -= render_canonical_stars(image.shape, faint, core,
+                                    gsub=WING_GMAX, amps=amps, verbose=False)
+    image -= model
+    if verbose:
+        amp = ('the prediction' if amps is None else
+               f'from the cores, median {np.median(amps):.2f}, '
+               f'{np.mean(amps == 1.0) * 100:.0f} percent fallback')
+        print(f'    wings of {faint.size} stars of G {gsub:g}-{WING_GMAX:g} '
+              f'subtracted (cores kept, not masked; amplitude {amp}), max '
+              f'{model.max():.2f} nJy')
+    return int(faint.size)
+
 
 def load_wing(fname):
     """
@@ -55,8 +250,9 @@ def handle_stars_joint(deep_coadd, wcs, gaia, wing, gsub=None,
     (apply_background(None)), leaving the image with only the initial
     background subtracted, the one determined without masking
     objects; the mesh then takes the place of the 'object' model.
-    The sky mesh and the star model are subtracted in place.  Returns
-    what lsst_mdet.starsub.handle_stars returns, plus the fit.
+    The sky mesh and the star model are subtracted in place, and with
+    WING_GMAX set the wings of the fainter stars (subtract_faint_wings).
+    Returns what lsst_mdet.starsub.handle_stars returns, plus the fit.
 
     Parameters
     ----------
@@ -88,9 +284,11 @@ def handle_stars_joint(deep_coadd, wcs, gaia, wing, gsub=None,
         transform off the mask, and the fit dict: the census
         (stars), A, free, nodes, node_values, spacing, prior, gfit,
         gsub, chi2, ncell, sky_sigma, shape, bg_restored and the
-        wing, for make_fit_tables; and diffuse, the bool mask of the
+        wing, for make_fit_tables; diffuse, the bool mask of the
         large diffuse segments left to the sky fit (joint_fit), for
-        the caller to mask
+        the caller to mask; nwing, the number of fainter stars
+        whose wings were subtracted, and the settings of that step
+        (wing_gmax, wing_rin, wing_rout, wing_core_rap)
     """
     from scipy import ndimage
     from lsst_mdet.defaults import DM_NO_DATA
@@ -136,6 +334,8 @@ def handle_stars_joint(deep_coadd, wcs, gaia, wing, gsub=None,
     )
     image -= jf['sky']
     image -= jf['star_model']
+    nwing = subtract_faint_wings(image, gaia, x, y, wing, gsub, good=good,
+                                 verbose=verbose)
     star_table = make_star_table(stars, [])
     star_table['A'] = jf['A']
     if verbose:
@@ -161,6 +361,11 @@ def handle_stars_joint(deep_coadd, wcs, gaia, wing, gsub=None,
         bg_restored=bg_restored,
         wing=wing,
         diffuse=jf['diffuse'],
+        nwing=nwing,
+        wing_gmax=WING_GMAX,
+        wing_rin=WING_RIN,
+        wing_rout=WING_ROUT,
+        wing_core_rap=WING_CORE_RAP,
     )
     return starmask, star_table, dstar, fit
 
@@ -180,9 +385,11 @@ def make_fit_tables(fits):
     -------
     dict of extname -> structured array, for the extensions
     META_EXT (one row per band: image shape, mesh geometry, the
-    fit settings and quality, the background restored and the
-    wing file), STARS_EXT (one row per census star with the
-    per-band amplitude A_{band} and free_{band}), SKY_EXT (one
+    fit settings and quality, the background restored, the wing
+    file, and the faint-star wing step's settings and number of
+    stars, NaN for a setting that was None), STARS_EXT (one row per
+    census star with the per-band amplitude A_{band} and
+    free_{band}), SKY_EXT (one
     row per mesh node per band) and WING_EXT (one row per radius
     per band of the wing profile, nJy per unit Gaia flux)
     """
@@ -197,7 +404,13 @@ def make_fit_tables(fits):
         ('prior', 'f4'), ('nfree', 'i4'), ('npinned', 'i4'),
         ('ncell', 'i4'), ('chi2', 'f4'), ('sky_sigma', 'f4'),
         ('bg_restored', 'U16'), ('wing_file', 'U256'),
+        ('wing_gmax', 'f4'), ('wing_rin', 'f4'), ('wing_rout', 'f4'),
+        ('wing_core_rap', 'f4'), ('nwing', 'i4'),
     ])
+
+    def setting(fit, name):
+        v = fit.get(name)
+        return np.nan if v is None else v
 
     star_dtype = [(name, stars.dtype[name]) for name in CENSUS_COLUMNS]
     for band in bands:
@@ -223,6 +436,9 @@ def make_fit_tables(fits):
             int((~fit['free']).sum()), fit['ncell'], fit['chi2'],
             fit['sky_sigma'], fit['bg_restored'],
             getattr(fit['wing'], 'fname', ''),
+            setting(fit, 'wing_gmax'), setting(fit, 'wing_rin'),
+            setting(fit, 'wing_rout'), setting(fit, 'wing_core_rap'),
+            fit.get('nwing', 0),
         )
         star_table[f'A_{band}'] = fit['A']
         star_table[f'free_{band}'] = fit['free']
@@ -284,7 +500,9 @@ def render_fit(tables, band):
     in the meta table's bg_restored restored, so image_delivered
     + that background - sky - stars is the image the processing
     saw (before the background redo's noise calibration and the
-    star taper).
+    star taper), less the wings of the stars below the census
+    depth (subtract_faint_wings, nwing of them in the meta table),
+    which are not stored and so not rebuilt here.
 
     Parameters
     ----------
