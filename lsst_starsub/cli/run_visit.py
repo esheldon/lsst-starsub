@@ -16,6 +16,13 @@ import numpy as np
 
 
 def get_args():
+    """
+    Parse the command line.
+
+    Returns
+    -------
+    args: argparse.Namespace
+    """
     import argparse
     from . import add_butler_arguments
     from ..census import GSUB
@@ -65,6 +72,22 @@ def get_args():
 
 
 def output_name(outdir, tract, patch, band, visit, detector, ext):
+    """
+    Build the per-detector output path.
+
+    Parameters
+    ----------
+    outdir: str
+    tract, patch: int
+    band: str
+    visit, detector: int
+    ext: str
+        The extension, without the dot
+
+    Returns
+    -------
+    path: str
+    """
     return os.path.join(
         outdir,
         f'{tract:05d}-{patch:02d}-{band}-{visit}-{detector:03d}.{ext}',
@@ -72,6 +95,18 @@ def output_name(outdir, tract, patch, band, visit, detector, ext):
 
 
 def process_one(butler, visit, detector, args, iq_score=np.nan):
+    """
+    Characterize one visit-detector and write its outputs.
+
+    Parameters
+    ----------
+    butler: lsst.daf.butler.Butler
+    visit, detector: int
+    args: argparse.Namespace
+        From get_args
+    iq_score: float, optional
+        The shapelets IQ score, for the record
+    """
     from ..census import field_segmentation
     from ..visit.profiles import ambient_levels, measure_profiles
     from ..visit.exposure import (
@@ -169,6 +204,9 @@ def process_one(butler, visit, detector, args, iq_score=np.nan):
 
 
 def main():
+    """
+    Characterize the coadd inputs of a patch, or one visit-detector.
+    """
     from ..visit.exposure import (
         load_iq_scores,
         make_visit_butler,

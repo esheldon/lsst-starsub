@@ -17,6 +17,13 @@ import numpy as np
 
 
 def get_args():
+    """
+    Parse the command line.
+
+    Returns
+    -------
+    args: argparse.Namespace
+    """
     import argparse
     from . import add_butler_arguments
 
@@ -36,6 +43,24 @@ def get_args():
 
 
 def annulus_profile(arr, ir, nbin, sel=None):
+    """
+    Take the mean of an image in annuli.
+
+    Parameters
+    ----------
+    arr: array
+    ir: int array
+        The annulus index of each pixel
+    nbin: int
+        The number of annuli
+    sel: bool array, optional
+        Pixels used; all when None
+
+    Returns
+    -------
+    prof: array
+        NaN where an annulus is empty
+    """
     if sel is None:
         sel = np.ones(arr.shape, dtype=bool)
     out = np.full(nbin, np.nan)
@@ -47,6 +72,9 @@ def annulus_profile(arr, ir, nbin, sel=None):
 
 
 def main():
+    """
+    Run the forward-model check of the visit polynomial on one input.
+    """
     import rustfits
     import matplotlib
     matplotlib.use('Agg')
@@ -85,6 +113,7 @@ def main():
     resp = res['response']
 
     def structure(a):
+        """The image minus its smooth surface."""
         return a - fit_smooth_surface(a, SMOOTH_ORDER)
 
     sstruct, fstruct, rstruct = structure(stored), structure(fit0), \

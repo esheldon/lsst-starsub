@@ -90,12 +90,34 @@ OUTPUT_DTYPE = [
 
 
 def get_gaia_file(tract, outdir=GAIA_DIR):
+    """
+    Get the path of a tract's Gaia file.
+
+    Parameters
+    ----------
+    tract: int
+    outdir: str, optional
+
+    Returns
+    -------
+    path: str
+    """
     return os.path.join(outdir, GAIA_FILE_PATTERN.format(tract=tract))
 
 
 def get_abs_galactic_b(skymap, tracts):
     """
-    the absolute galactic latitude in degrees of the tract centers
+    Get the absolute galactic latitude of the tract centers.
+
+    Parameters
+    ----------
+    skymap: lsst.skymap.BaseSkyMap
+    tracts: list of int
+
+    Returns
+    -------
+    abs_b: array
+        Degrees
     """
     from astropy.coordinates import SkyCoord
     import astropy.units as u
@@ -113,11 +135,21 @@ def get_abs_galactic_b(skymap, tracts):
 
 def select_high_latitude(skymap, tracts, min_abs_b):
     """
-    split the tracts by the galactic latitude cut
+    Split the tracts by the galactic latitude cut.
+
+    Parameters
+    ----------
+    skymap: lsst.skymap.BaseSkyMap
+    tracts: list of int
+    min_abs_b: float
+        Degrees; <= 0 keeps every tract
 
     Returns
     -------
-    keep, drop: lists of tracts with |b| >= min_abs_b and below it
+    keep: list of int
+        The tracts with |b| >= min_abs_b
+    drop: list of int
+        The rest
     """
     if min_abs_b <= 0:
         return list(tracts), []
@@ -130,7 +162,12 @@ def select_high_latitude(skymap, tracts, min_abs_b):
 
 def get_tract_circle(skymap, tract):
     """
-    the bounding circle of the tract outer polygon, grown by the margin
+    Get the bounding circle of a tract, grown by MARGIN_DEG.
+
+    Parameters
+    ----------
+    skymap: lsst.skymap.BaseSkyMap
+    tract: int
 
     Returns
     -------
@@ -148,7 +185,15 @@ def get_tract_circle(skymap, tract):
 
 def get_shard_ids(circle):
     """
-    the HTM shard ids overlapping the circle
+    List the HTM shard ids overlapping a circle.
+
+    Parameters
+    ----------
+    circle: lsst.sphgeom.Circle
+
+    Returns
+    -------
+    ids: list of int
     """
     import lsst.sphgeom as sphgeom
 
@@ -158,8 +203,18 @@ def get_shard_ids(circle):
 
 def flux_to_mag(flux, band):
     """
-    nJy AB flux to the Gaia magnitude in the band; non-positive or
-    missing flux becomes nan
+    Convert nJy AB flux to the Gaia magnitude in a band.
+
+    Parameters
+    ----------
+    flux: array
+        nJy; non-positive or missing flux becomes nan
+    band: str
+        'g', 'bp' or 'rp'
+
+    Returns
+    -------
+    mag: array
     """
     flux = np.asarray(flux, dtype='f8')
     mag = np.full(flux.shape, np.nan)
@@ -173,7 +228,16 @@ def flux_to_mag(flux, band):
 
 def convert_shard(cat):
     """
-    convert a refcat shard (SimpleCatalog) to the output layout
+    Convert a refcat shard to the output layout.
+
+    Parameters
+    ----------
+    cat: lsst.afw.table.SimpleCatalog
+
+    Returns
+    -------
+    stars: structured array
+        OUTPUT_DTYPE
     """
     rad2deg = np.rad2deg(1.0)
     # rad to mas, for the proper motions (per year) and parallax
@@ -200,11 +264,22 @@ def convert_shard(cat):
 
 def in_circle(circle, ra, dec):
     """
-    which of the positions (degrees) fall in the circle: the angle
-    to the circle center is within the opening angle, done as a dot
-    product with the center unit vector.  Vectorized; the per-star
-    sphgeom call is far too slow for the millions of stars in a
-    galactic plane tract
+    Test which positions fall in a circle.
+
+    The angle to the circle center is within the opening angle,
+    done as a dot product with the center unit vector.  Vectorized;
+    the per-star sphgeom call is far too slow for the millions of
+    stars in a galactic plane tract.
+
+    Parameters
+    ----------
+    circle: lsst.sphgeom.Circle
+    ra, dec: arrays
+        Degrees
+
+    Returns
+    -------
+    inside: bool array
     """
     center = circle.getCenter()
     cx, cy, cz = center.x(), center.y(), center.z()
@@ -223,8 +298,19 @@ def in_circle(circle, ra, dec):
 
 def make_tract_file(butler, skymap, tract, outfile, gmax):
     """
-    read the shards overlapping the tract circle and write the stars
-    in the circle brighter than gmax to outfile
+    Write a tract's Gaia file.
+
+    Read the shards overlapping the tract circle and write the stars
+    in the circle brighter than gmax, sorted by source_id.
+
+    Parameters
+    ----------
+    butler: lsst.daf.butler.Butler
+        With the refcat collection
+    skymap: lsst.skymap.BaseSkyMap
+    tract: int
+    outfile: str
+    gmax: float
     """
     import rustfits
 
@@ -259,8 +345,18 @@ def make_tract_file(butler, skymap, tract, outfile, gmax):
 
 def get_tracts(args):
     """
-    the tracts from --tracts or the unique tracts in the good cells
-    file
+    Get the tracts to process.
+
+    Parameters
+    ----------
+    args: argparse.Namespace
+        From get_args; --tracts, else the unique tracts in the
+        good cells file
+
+    Returns
+    -------
+    tracts: list of int
+        Sorted
     """
     import rustfits
 
@@ -276,6 +372,14 @@ def get_tracts(args):
 
 
 def go(args):
+    """
+    Write the Gaia files of the selected tracts.
+
+    Parameters
+    ----------
+    args: argparse.Namespace
+        From get_args
+    """
     from lsst.daf.butler import Butler
 
     tracts = get_tracts(args)
@@ -310,6 +414,13 @@ def go(args):
 
 
 def get_args():
+    """
+    Parse the command line.
+
+    Returns
+    -------
+    args: argparse.Namespace
+    """
     import argparse
 
     parser = argparse.ArgumentParser(
@@ -343,6 +454,9 @@ def get_args():
 
 
 def main():
+    """
+    Make the per-tract Gaia files.
+    """
     args = get_args()
     go(args)
 

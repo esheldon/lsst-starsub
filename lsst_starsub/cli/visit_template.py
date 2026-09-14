@@ -17,6 +17,13 @@ _WORKER = {}
 
 
 def get_args():
+    """
+    Parse the command line.
+
+    Returns
+    -------
+    args: argparse.Namespace
+    """
     import argparse
     from . import add_butler_arguments
 
@@ -54,6 +61,19 @@ def get_args():
 
 
 def visit_detectors(butler, visit):
+    """
+    List the detectors of a visit with a wcs and a calibration.
+
+    Parameters
+    ----------
+    butler: lsst.daf.butler.Butler
+    visit: int
+
+    Returns
+    -------
+    detectors: list of int
+        Sorted
+    """
     from ..site import INSTRUMENT
 
     cat = butler.get(
@@ -66,6 +86,21 @@ def visit_detectors(butler, visit):
 
 
 def extract_one(butler, visit, detector, gaia_path):
+    """
+    Load one detector and extract its template inputs.
+
+    Parameters
+    ----------
+    butler: lsst.daf.butler.Butler
+    visit, detector: int
+    gaia_path: str
+        The visit's Gaia file
+
+    Returns
+    -------
+    extract: dict
+        From lsst_starsub.visit.template.extract_detector
+    """
     from ..visit.template import extract_detector
     from ..visit.exposure import load_gaia_for_exposure, load_visit_exposure
 
@@ -78,6 +113,19 @@ def extract_one(butler, visit, detector, gaia_path):
 
 
 def _worker(args):
+    """
+    Run extract_one in a pool process, with a butler made once.
+
+    Parameters
+    ----------
+    args: tuple
+        repo, collection, visit, detector, gaia_path
+
+    Returns
+    -------
+    extract: dict
+        None when the detector failed
+    """
     from ..visit.exposure import make_visit_butler
 
     repo, collection, visit, detector, gaia_path = args
@@ -91,6 +139,18 @@ def _worker(args):
 
 
 def read_extract(fname):
+    """
+    Read a saved per-detector extract.
+
+    Parameters
+    ----------
+    fname: str
+
+    Returns
+    -------
+    extract: dict
+        As extract_detector returns it
+    """
     import rustfits
     from ..visit.template import wing_edges
 
@@ -111,6 +171,15 @@ def read_extract(fname):
 
 
 def write_extract(fname, ext):
+    """
+    Write a per-detector extract.
+
+    Parameters
+    ----------
+    fname: str
+    ext: dict
+        From extract_detector
+    """
     import rustfits
 
     with rustfits.FITS(fname, 'w+') as fits:
@@ -126,6 +195,9 @@ def write_extract(fname, ext):
 
 
 def main():
+    """
+    Extract the detectors of a visit and pool their template.
+    """
     from ..visit.gaia import ensure_visit_gaia_file
     from ..visit.exposure import make_visit_butler
 
@@ -184,6 +256,16 @@ def main():
 
 
 def pool_and_write(args, extracts):
+    """
+    Pool the extracts and write the template file and its png.
+
+    Parameters
+    ----------
+    args: argparse.Namespace
+        From get_args
+    extracts: list of dict
+        From extract_detector
+    """
     from ..visit.template import plot_template, pool_visit, write_template_file
 
     pooled = pool_visit(extracts)

@@ -38,6 +38,13 @@ export NUMEXPR_NUM_THREADS=1
 
 
 def get_args():
+    """
+    Parse the command line.
+
+    Returns
+    -------
+    args: argparse.Namespace
+    """
     import argparse
     from . import add_butler_arguments
 
@@ -64,6 +71,9 @@ def get_args():
 
 
 def main():
+    """
+    Write the per-detector extraction jobs and their submit script.
+    """
     from ..visit.gaia import ensure_visit_gaia_file
     from ..visit.exposure import make_visit_butler
     from .visit_template import visit_detectors

@@ -150,7 +150,7 @@ NPASS = 3           # joint amplitude passes
 
 def select_template_stars(gaia, x, y, shape):
     """
-    Get indices of the template-stack stars
+    Select the template-stack stars.
 
     bright but unsaturated, astrometrically clean, and far enough from the
     edges for a full stamp; brightest TMPL_NSTAR kept.
@@ -174,7 +174,8 @@ def select_template_stars(gaia, x, y, shape):
 
     Returns
     -------
-    indices into gaia, brightest first
+    sel: int array
+        Indices into gaia, brightest first
     """
     ny, nx = shape
     half = TMPL_HALF
@@ -211,8 +212,9 @@ def select_template_stars(gaia, x, y, shape):
 def stack_star_stamps(image, good, seg, x, y, sel,
                       min_stamps=TMPL_MIN_STAMPS):
     """
-    Get core-normalized, sub-pixel-aligned median stack of the selected stars,
-    point-symmetrized.
+    Stack the selected stars into a core-normalized median template.
+
+    Sub-pixel aligned and point-symmetrized.
 
     Other detections are NaNed out of each stamp so neighbors cannot bias the
     stack
@@ -229,6 +231,8 @@ def stack_star_stamps(image, good, seg, x, y, sel,
         Patch-frame pixel positions of the gaia stars
     sel: array
         Indices of the template stars
+    min_stamps: int, optional
+        The fewest usable stamps accepted; default TMPL_MIN_STAMPS
 
     Returns
     -------
@@ -298,9 +302,10 @@ def stack_star_stamps(image, good, seg, x, y, sel,
 
 def denoise_template(tmpl):
     """
-    blend the stack into its azimuthal median profile beyond
-    the high-s/n core, so residual stack noise multiplied by a
-    bright star's amplitude cannot imprint on the image
+    Blend the stack into its azimuthal median profile beyond the core.
+
+    So that residual stack noise multiplied by a bright star's
+    amplitude cannot imprint on the image.
 
     Parameters
     ----------
@@ -345,7 +350,7 @@ def denoise_template(tmpl):
 
 def fit_halo_slope(prof, fallback_slope=HALO_SLOPE):
     """
-    Fit the slope of the halo
+    Fit the slope of the halo.
 
     This is a joint power-law plus sky-pedestal fit
 
@@ -376,6 +381,7 @@ def fit_halo_slope(prof, fallback_slope=HALO_SLOPE):
     pfit = prof[rfit.astype(int)]
 
     def linfit(s):
+        """The least-squares amplitude and pedestal at slope s."""
         basis = np.vstack([rfit ** s, np.ones(rfit.size)]).T
         coef, res, *_ = np.linalg.lstsq(basis, pfit, rcond=None)
         rss = float(res[0]) if res.size else float(
@@ -415,7 +421,7 @@ def fit_halo_slope(prof, fallback_slope=HALO_SLOPE):
 
 def template_out_half(gmag):
     """
-    Get the template stamp half size
+    Get the template stamp half size of a star.
 
     the analytic halo extends to TMPL_EXT_FACTOR times the mask radius (floored
     at TMPL_OUT_HALF, capped at TMPL_OUT_MAX) so the brightest stars' wings are
@@ -428,7 +434,8 @@ def template_out_half(gmag):
 
     Returns
     -------
-    int stamp half size in pixels
+    half: int
+        The stamp half size in pixels
     """
     return int(np.clip(
         TMPL_EXT_FACTOR * circle_radius(gmag),
@@ -447,10 +454,11 @@ def extend_template_halo(
     r_join=44.0,
 ):
     """
-    embed the measured template in a larger stamp whose outer
-    halo is the fitted inner power law plus the scattering
-    aureole, with a smooth junction over r_blend to r_join and
-    an edge taper to zero
+    Embed the measured template in a larger stamp with an analytic halo.
+
+    The outer halo is the fitted inner power law plus the scattering
+    aureole, with a smooth junction over r_blend to r_join and an
+    edge taper to zero.
 
     Parameters
     ----------
@@ -471,7 +479,8 @@ def extend_template_halo(
 
     Returns
     -------
-    the (2 out_half + 1)^2 extended template
+    big: array
+        The (2 out_half + 1)^2 extended template
     """
 
     half = TMPL_HALF
@@ -519,12 +528,13 @@ def extend_template_halo(
 
 def measure_wing_profiles(image, good, seg, stars):
     """
-    flux-normalized azimuthal wing profiles of the mid-bright
-    (AUR_GMIN <= G < AUR_GMAX) census stars, medianed across
-    stars in common log-spaced radial bins outside each star's
-    own mask.  Other detections and other stars' zones are
-    excluded; each star is normalized by 10^(-0.4 G) so the
-    curves overlay when the wings are self-similar
+    Measure the mid-bright stars' flux-normalized wing profiles.
+
+    The azimuthal profiles of the census stars with AUR_GMIN <= G <
+    AUR_GMAX, medianed across stars in common log-spaced radial bins
+    outside each star's own mask.  Other detections and other stars'
+    zones are excluded; each star is normalized by 10^(-0.4 G) so
+    the curves overlay when the wings are self-similar.
 
     Parameters
     ----------
@@ -629,7 +639,7 @@ def measure_wing_profiles(image, good, seg, stars):
 
 def fit_aureole(rmid, med, count, nstars, slope, ln_a):
     """
-    fit the outer aureole component
+    Fit the outer aureole component.
 
     Fit in template units. the amplitude b and slope s_aur of b * r^s_aur,
     added to the inner power law beyond the measured stack.
@@ -673,6 +683,7 @@ def fit_aureole(rmid, med, count, nstars, slope, ln_a):
     a_in = float(np.exp(ln_a))
 
     def b_continuity(s_aur):
+        """The aureole amplitude continuous with the inner law at AUR_BREAK."""
         return a_in * AUR_BREAK ** (slope - s_aur)
 
     usable = (
@@ -686,6 +697,7 @@ def fit_aureole(rmid, med, count, nstars, slope, ln_a):
     if usable.sum() >= 3:
 
         def linfit(s):
+            """The linear fit at aureole slope s."""
             # k_in * (inner law) + bb * r^s.  In
             # template units the aureole amplitude is bb/k_in
             r = rmid[usable]
@@ -759,7 +771,7 @@ def fit_aureole(rmid, med, count, nstars, slope, ln_a):
 
 def psf_cube_fwhm(psfs, scale=0.2):
     """
-    median half-max FWHM of a psf stamp cube, in arcsec
+    Get the median half-max FWHM of a psf stamp cube, in arcsec.
 
     Parameters
     ----------
@@ -771,7 +783,8 @@ def psf_cube_fwhm(psfs, scale=0.2):
 
     Returns
     -------
-    float FWHM in arcsec, or None when nothing is measurable
+    fwhm: float or None
+        In arcsec; None when nothing is measurable
     """
     c = (psfs.shape[1] - 1) / 2
     gy, gx = np.mgrid[0:psfs.shape[1], 0:psfs.shape[2]]
@@ -800,8 +813,7 @@ def psf_cube_fwhm(psfs, scale=0.2):
 
 def measure_coadd_fwhm(deep_coadd):
     """
-    median PSF FWHM of the coadd in arcsec, for the canonical
-    amplitude prior
+    Get the median PSF FWHM of the coadd, for the canonical prior.
 
     Uses the stored psf cube when present (file mode), else
     evaluates the psf on a small interior grid (butler mode).
@@ -815,7 +827,8 @@ def measure_coadd_fwhm(deep_coadd):
 
     Returns
     -------
-    float FWHM in arcsec, or None
+    fwhm: float or None
+        In arcsec
     """
     psfs = getattr(deep_coadd, '_psfs', None)
 
@@ -843,8 +856,9 @@ def measure_coadd_fwhm(deep_coadd):
 
 def fit_canonical_amplitude(prof, canon, fwhm):
     """
-    one-amplitude fit of a sparse-field profile against the
-    canonical band shape, combined with the seeing prior
+    Fit one amplitude of a sparse-field profile to the canonical shape.
+
+    Combined with the seeing prior.
 
     The measured stack profile is fit as
     amp * canonical_law(r) + pedestal over the 22-50 px wing.
@@ -917,7 +931,7 @@ def fit_canonical_amplitude(prof, canon, fwhm):
 def build_template(image, good, seg, gaia, x, y, stars,
                    band=None, fwhm=None):
     """
-    build the empirical extended star template
+    Build the empirical extended star template.
 
     a median stack of bright unsaturated Gaia stars centered on their predicted
     positions (registration is a few hundredths of a pixel), core-normalized,
@@ -954,7 +968,8 @@ def build_template(image, good, seg, gaia, x, y, stars,
 
     Returns
     -------
-    the extended template array
+    big: array
+        The extended template
 
     Raises
     ------
@@ -1069,7 +1084,7 @@ def anchor_ring(
     half,
 ):
     """
-    Get the amplitude anchor
+    Get the amplitude anchor ring of a star.
 
     This is a 2-10 px band just outside the star's own mask, which is exactly
     where the subtraction has to be right
@@ -1091,7 +1106,8 @@ def anchor_ring(
 
     Returns
     -------
-    bool ring mask, or None when no usable ring exists
+    ring: bool array or None
+        The ring mask; None when no usable ring exists
     """
     from scipy import ndimage
 
@@ -1135,7 +1151,7 @@ def anchor_ring(
 
 def make_star_stamp(image, good, comps, tmpl, rr, st, si):
     """
-    build the per-star working set
+    Build the per-star working set.
 
     In the image window, sub-pixel shifted template, and amplitude anchor ring.
     The stamp extent scales with brightness (template_out_half), windowing the
@@ -1161,10 +1177,10 @@ def make_star_stamp(image, good, comps, tmpl, rr, st, si):
 
     Returns
     -------
-    dict with keys sl (image slice), T (shifted template
-    cutout), ring (anchor mask or None), A (amplitude,
-    initially 0), G, idx -- or None for stars whose stamp
-    barely overlaps the image
+    entry: dict or None
+        Keys sl (image slice), T (shifted template cutout), ring
+        (anchor mask or None), A (amplitude, initially 0), G, idx;
+        None for stars whose stamp barely overlaps the image
     """
     from scipy import ndimage
 
@@ -1245,8 +1261,9 @@ def make_star_stamp(image, good, comps, tmpl, rr, st, si):
 
 def fit_flux_zeropoint(image, slist):
     """
-    fit the fixed-slope flux relation A = 10^(zp - 0.4 G) from
-    the bright-star ring amplitudes
+    Fit the fixed-slope flux relation to the bright-star amplitudes.
+
+    A = 10^(zp - 0.4 G) from the ring amplitudes.
 
     Parameters
     ----------
@@ -1282,7 +1299,7 @@ def fit_flux_zeropoint(image, slist):
 
 def solve_joint_amplitudes(image, slist, zp):
     """
-    solve the amplitudes in NPASS Gauss-Seidel passes
+    Solve the amplitudes in NPASS Gauss-Seidel passes.
 
     each star's ring amplitude is measured on the data minus the other stars'
     current models, so close pairs do not double count each other's halos.
@@ -1307,7 +1324,8 @@ def solve_joint_amplitudes(image, slist, zp):
 
     Returns
     -------
-    the summed model image, same shape as image
+    model: array
+        The summed model image, the shape of image
     """
 
     model = np.zeros_like(image)
@@ -1346,7 +1364,7 @@ def solve_joint_amplitudes(image, slist, zp):
 def subtract_stars(image, var, mask0, gaia, x, y, stars, comps,
                    band=None, fwhm=None):
     """
-    subtract every census star, modifying image in place
+    Subtract every census star, modifying the image in place.
 
     build the template, anchor each amplitude on the robust median of
     data/template in a 2-10 px band just outside the star's own mask, refine
@@ -1456,8 +1474,9 @@ def subtract_stars(image, var, mask0, gaia, x, y, stars, comps,
 
 def restore_object_background(deep_coadd, dbright):
     """
-    add the stored 'object' background model back to the image around the
-    bright stars.
+    Restore the stored object background around the bright stars.
+
+    The model is added back to the image, in place.
 
     That model absorbs star wings and scattered light; restoring it there (an
     exact undo, weight 1 within RESTORE_RAD of the bright-star masks tapering
@@ -1558,7 +1577,7 @@ def handle_stars(
     subtract=True, restore=True,
 ):
     """
-    the getimages-time star handling, modifying the image in place
+    Subtract and mask the census stars of a coadd, in place.
 
     Do the census and star mask; then, when subtracting, the local restoration
     of the stored object background around the bright stars, the mask-aware

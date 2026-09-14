@@ -1,7 +1,9 @@
 """
-the cell coadd as delivered: the data id, the loader that gives
-the MultipleCellCoadd with the object background restored, and
-the smooth-surface fit the forward-model check uses
+The cell coadd as delivered.
+
+The data id, the loader that gives the MultipleCellCoadd with the
+object background restored, and the smooth-surface fit the
+forward-model check uses.
 """
 import numpy as np
 
@@ -9,17 +11,40 @@ from ..site import SKYMAP
 
 
 def coadd_data_id(tract, patch, band):
+    """
+    Build the butler data id of a patch coadd.
+
+    Parameters
+    ----------
+    tract, patch: int
+    band: str
+
+    Returns
+    -------
+    data_id: dict
+    """
     return dict(band=band, skymap=SKYMAP, tract=tract, patch=patch)
 
 
 def load_cell_coadd(butler, did):
     """
-    the None-state cell coadd as a MultipleCellCoadd:
-    deep_coadd_cell_predetection where present (the weekly
-    runs), else DP2's deep_coadd, a lsst.images CellCoadd with
-    the object background subtracted, restored
-    (apply_background(None)) and converted to the legacy class
-    (per-cell inputs with weights, stitch, grid, wcs)
+    Load the None-state cell coadd of a patch.
+
+    deep_coadd_cell_predetection where present (the weekly runs),
+    else DP2's deep_coadd, a lsst.images CellCoadd with the object
+    background subtracted, restored (apply_background(None)) and
+    converted to the legacy class (per-cell inputs with weights,
+    stitch, grid, wcs).
+
+    Parameters
+    ----------
+    butler: lsst.daf.butler.Butler
+    did: dict
+        The data id (coadd_data_id)
+
+    Returns
+    -------
+    coadd: MultipleCellCoadd
     """
     try:
         have = bool(butler.exists('deep_coadd_cell_predetection', did))
@@ -47,8 +72,19 @@ SMOOTH_ORDER = 2
 
 def fit_smooth_surface(model, order):
     """
-    least-squares polynomial surface of the given total order
-    over the model's grid, returned evaluated on the grid
+    Fit a polynomial surface to an image and evaluate it on the grid.
+
+    Parameters
+    ----------
+    model: array
+        The image
+    order: int
+        The total order; 0 fits the mean alone
+
+    Returns
+    -------
+    surface: array
+        The least-squares surface, the shape of model
     """
     ny, nx = model.shape
     y, x = np.mgrid[0:ny, 0:nx]

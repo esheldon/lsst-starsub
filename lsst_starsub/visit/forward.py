@@ -42,15 +42,27 @@ DETECTED_PLANES = ['DETECTED', 'DETECTED_NEGATIVE']
 
 def load_raw_exposure(butler, visit, detector):
     """
-    the preliminary visit image (ADU) with its stored background
-    added back, i.e. the sky image the star_background fit saw,
-    plus the stored BackgroundList, the calibration (nJy per ADU)
-    and the calibrateImage metadata entries that set the fit's
-    mask
+    Load the raw sky image the star_background fit saw.
+
+    The preliminary visit image (ADU) with its stored background
+    added back, plus the stored BackgroundList, the calibration
+    (nJy per ADU) and the calibrateImage metadata entries that set
+    the fit's mask.
+
+    Parameters
+    ----------
+    butler: lsst.daf.butler.Butler
+    visit, detector: int
 
     Returns
     -------
-    raw: afw ExposureF (ADU, sky in), bglist, calib, meta dict
+    raw: afw ExposureF
+        ADU, sky in
+    bglist: lsst.afw.math.BackgroundList
+    calib: float
+    meta: dict
+        adaptive_threshold, psf_threshold, psf_multiplier,
+        detected_fraction
     """
     did = dict(instrument=INSTRUMENT, visit=int(visit),
                detector=int(detector))
@@ -79,12 +91,21 @@ def load_raw_exposure(butler, visit, detector):
 
 
 def _clear_detected(mask):
+    """Clear the DETECTED planes of an afw Mask in place."""
     for name in DETECTED_PLANES:
         mask.clearMaskPlane(mask.getMaskPlane(name))
 
 
 def _dilate_detected(mask, npix):
-    """grow the DETECTED planes of an afw Mask by npix, in place"""
+    """
+    Grow the DETECTED planes of an afw Mask in place.
+
+    Parameters
+    ----------
+    mask: lsst.afw.image.Mask
+    npix: int
+        The dilation in pixels
+    """
     from lsst.afw.geom import SpanSet
 
     for name in DETECTED_PLANES:
@@ -97,8 +118,24 @@ def _dilate_detected(mask, npix):
 
 def _detect(exposure, threshold, multiplier, grow, clear=True):
     """
-    run SourceDetectionTask with the given threshold settings on
-    the exposure, setting its DETECTED planes
+    Run SourceDetectionTask on an exposure, setting its DETECTED planes.
+
+    Parameters
+    ----------
+    exposure: afw ExposureF
+    threshold: float
+        In pixel_stdev units
+    multiplier: float
+        The include-threshold multiplier
+    grow: float
+        Footprint growth in psf sigma
+    clear: bool, optional
+        Clear the DETECTED planes first
+
+    Returns
+    -------
+    res: lsst.pipe.base.Struct
+        The task's result (sources, numPosPeaks, ...)
     """
     import lsst.afw.table as afwTable
     from lsst.meas.algorithms import (
@@ -121,15 +158,14 @@ def _detect(exposure, threshold, multiplier, grow, clear=True):
 
 def reconstruct_fit_mask(raw, prelim, meta):
     """
-    the mask the star_background fit saw, on a clone of the raw
-    exposure's mask
+    Reconstruct the mask the star_background fit saw.
 
-    The first-pass DETECTED plane (psf detection on the
-    background-subtracted image at psf_threshold x multiplier,
-    grown 2.4 sigma) is rebuilt on the preliminary image and
-    dilated by 10 px; the star-background detection at the
-    stored adaptive threshold on the raw sky image with
-    footprints grown by 70 sigma is ORed with it
+    On a clone of the raw exposure's mask.  The first-pass DETECTED
+    plane (psf detection on the background-subtracted image at
+    psf_threshold x multiplier, grown 2.4 sigma) is rebuilt on the
+    preliminary image and dilated by 10 px; the star-background
+    detection at the stored adaptive threshold on the raw sky image
+    with footprints grown by 70 sigma is ORed with it.
 
     Parameters
     ----------
@@ -143,7 +179,9 @@ def reconstruct_fit_mask(raw, prelim, meta):
 
     Returns
     -------
-    afw Mask, and a dict with the detected fractions
+    mask: lsst.afw.image.Mask
+    fractions: dict
+        detected_fraction, psf_dilated_fraction
     """
     import lsst.afw.image as afwImage
 
@@ -182,8 +220,16 @@ def reconstruct_fit_mask(raw, prelim, meta):
 
 def star_background_config(stat='MEANCLIP'):
     """
-    the star_background SubtractBackgroundConfig of calibrateImage
-    (stat other than MEANCLIP only for linearity tests)
+    Build the star_background SubtractBackgroundConfig of calibrateImage.
+
+    Parameters
+    ----------
+    stat: str, optional
+        The statistic; other than MEANCLIP only for linearity tests
+
+    Returns
+    -------
+    cfg: SubtractBackgroundConfig
     """
     from lsst.meas.algorithms import SubtractBackgroundConfig
 
@@ -205,10 +251,7 @@ def star_background_config(stat='MEANCLIP'):
 
 def fit_star_background(image, mask, variance, stat='MEANCLIP'):
     """
-    the star_background fit of calibrateImage on an image with
-    the given mask and variance planes: the rendered 6x6
-    Chebyshev surface (same units as image) and the afw
-    BackgroundList
+    Run the star_background fit of calibrateImage on an image.
 
     Parameters
     ----------
@@ -216,6 +259,14 @@ def fit_star_background(image, mask, variance, stat='MEANCLIP'):
     mask: afw Mask
         From reconstruct_fit_mask
     variance: ndarray
+    stat: str, optional
+        See star_background_config
+
+    Returns
+    -------
+    surface: ndarray
+        The rendered 6x6 Chebyshev surface, same units as image
+    bglist: lsst.afw.math.BackgroundList
     """
     import lsst.afw.image as afwImage
     from lsst.meas.algorithms import SubtractBackgroundTask
@@ -234,16 +285,27 @@ def fit_star_background(image, mask, variance, stat='MEANCLIP'):
 
 
 def stored_surface(bglist):
-    """layer 0 of a stored BackgroundList rendered as the fit did"""
+    """
+    Render layer 0 of a stored BackgroundList as the fit did.
+
+    Parameters
+    ----------
+    bglist: lsst.afw.math.BackgroundList
+
+    Returns
+    -------
+    surface: ndarray
+    """
     return bglist[0][0].getImageF().array.copy()
 
 
 def polynomial_response(raw, mask, star_image):
     """
-    the polynomial's response to a star image: the fit of the
-    raw image minus the fit of the raw image with the star image
-    removed, mask and variance held fixed (see the module notes
-    on why the star image is not fit alone)
+    Measure the polynomial's response to a star image.
+
+    The fit of the raw image minus the fit of the raw image with
+    the star image removed, mask and variance held fixed (see the
+    module notes on why the star image is not fit alone).
 
     Parameters
     ----------
@@ -256,7 +318,8 @@ def polynomial_response(raw, mask, star_image):
 
     Returns
     -------
-    dict with fit_raw, fit_nostar, response (= fit_raw - fit_nostar)
+    res: dict
+        fit_raw, fit_nostar, response (= fit_raw - fit_nostar)
     """
     var = raw.variance.array
     fit_raw, _ = fit_star_background(raw.image.array, mask, var)

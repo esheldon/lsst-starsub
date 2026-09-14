@@ -39,6 +39,10 @@ STATE = 'none'
 def get_args():
     """
     Parse the command line.
+
+    Returns
+    -------
+    args: argparse.Namespace
     """
     import argparse
     from . import add_butler_arguments

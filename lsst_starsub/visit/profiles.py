@@ -1,5 +1,5 @@
 """
-per-star wing profiles across the image states
+Per-star wing profiles across the image states.
 
 The characterization question is how much wing light the
 pipeline's 32 px background pass absorbed, and how well the
@@ -8,7 +8,7 @@ azimuthal median profile outside its own mask is measured on
 several states of the same detector image (delivered, restored
 and sky-flattened, star-subtracted residual) so the curves are
 directly comparable.  Profiles are in sky-sigma units and, for
-the stack, additionally normalized by 10^(-0.4 G)
+the stack, additionally normalized by 10^(-0.4 G).
 """
 import numpy as np
 
@@ -29,22 +29,55 @@ DMASK_STEP = 10.0
 
 
 def radial_edges():
+    """
+    Get the log-spaced annulus edges in radius from the star.
+
+    Returns
+    -------
+    edges: array
+        Integer radii from R_MIN to R_MAX
+    """
     return np.unique(np.round(np.logspace(
         np.log10(R_MIN), np.log10(R_MAX), NBIN + 1,
     )))
 
 
 def dmask_edges():
+    """
+    Get the linear annulus edges in distance beyond the mask radius.
+
+    Returns
+    -------
+    edges: array
+        0 to DMASK_MAX in steps of DMASK_STEP
+    """
     return np.arange(0.0, DMASK_MAX + DMASK_STEP / 2, DMASK_STEP)
 
 
 def ambient_levels(states, vexp, seg, exclude):
     """
-    per-state ambient reference: the median of the good,
-    unsegmented pixels outside the exclusion zone.  The states
-    differ by constant pedestals (the sky correction's net
-    offset, the ambient reference of the subtraction) that
-    would otherwise read as wing light
+    Measure the per-state ambient reference level.
+
+    The median of the good, unsegmented pixels outside the
+    exclusion zone.  The states differ by constant pedestals (the
+    sky correction's net offset, the ambient reference of the
+    subtraction) that would otherwise read as wing light.
+
+    Parameters
+    ----------
+    states: dict
+        name -> image state
+    vexp: VisitExposure
+        For the good mask
+    seg: array
+        The segmentation
+    exclude: bool array
+        The exclusion zone
+
+    Returns
+    -------
+    ambient: dict
+        name -> level
     """
     ok = vexp.good & (seg == 0) & ~exclude
     return {
@@ -55,9 +88,22 @@ def ambient_levels(states, vexp, seg, exclude):
 
 def star_window(shape, x, y, edges):
     """
-    the slice of the image around a star covering the outer
-    annulus edge, and the radius grid on it; (None, None) when
-    the window is empty
+    Get the image window around a star and the radius grid on it.
+
+    Parameters
+    ----------
+    shape: (ny, nx)
+    x, y: float
+        The star position
+    edges: array
+        The annulus edges; the window covers the outer one
+
+    Returns
+    -------
+    sl: slice
+        The window; None when it is empty
+    rr: array
+        Radius from the star on the window; None when empty
     """
     ny, nx = shape
     m = int(edges[-1]) + 2
@@ -73,8 +119,7 @@ def star_window(shape, x, y, edges):
 
 def star_profile(image, ok, rr, rad, edges):
     """
-    the azimuthal median profile of one star outside its mask
-    circle, on its window
+    Measure the azimuthal median profile of one star outside its mask.
 
     Parameters
     ----------
@@ -92,7 +137,10 @@ def star_profile(image, ok, rr, rad, edges):
 
     Returns
     -------
-    prof, npix: arrays over the annuli (NaN / 0 where empty)
+    prof: array
+        The median per annulus, NaN where fewer than MIN_PIX
+    npix: int array
+        The pixel count per annulus
     """
     prof = np.full(edges.size - 1, np.nan)
     npix = np.zeros(edges.size - 1, dtype=int)
@@ -109,9 +157,19 @@ def star_profile(image, ok, rr, rad, edges):
 
 def exclusion_radius(gmag, wide):
     """
-    the radius to which another star is kept out of a profile:
-    its wide (template-extent) radius, matching the ambient
-    reference's exclusion, or its mask circle plus the taper
+    Get the radius to which another star is kept out of a profile.
+
+    Parameters
+    ----------
+    gmag: float
+        The other star's G
+    wide: bool
+        Its wide (template-extent) radius, matching the ambient
+        reference's exclusion; else its mask circle plus the taper
+
+    Returns
+    -------
+    radius: float
     """
     from .exposure import WIDE_GMAX, WIDE_GROW
     from ..stamps import TMPL_OUT_MAX, template_out_half
@@ -125,9 +183,10 @@ def exclusion_radius(gmag, wide):
 
 def usable_pixels(good, seg, stars, st, sl, rr, wide=True):
     """
-    pixels usable for one star's profile on its window: good,
-    not another detection (the star's own segments allowed),
-    other stars excluded to their exclusion_radius
+    Find the pixels usable for one star's profile on its window.
+
+    Good, not another detection (the star's own segments allowed),
+    other stars excluded to their exclusion_radius.
 
     Parameters
     ----------
@@ -148,6 +207,11 @@ def usable_pixels(good, seg, stars, st, sl, rr, wide=True):
         are then out of the annuli, as they are out of the
         ambient reference); False for the mask circle plus
         taper only
+
+    Returns
+    -------
+    ok: bool array
+        On the window
     """
     segc = seg[sl]
     rad = float(circle_radius(float(st['G'])))
@@ -184,12 +248,14 @@ def measure_profiles(states, vexp, stars, seg, gmax=17.0, mode='r',
                      ambient=None, wide=True, local_ref=LOCAL_REF,
                      edges=None, gmin=None, good=None):
     """
-    per-star profiles on every image state, in sky-sigma units
+    Measure the per-star profiles on every image state.
+
+    In sky-sigma units, referenced to the ambient levels.
 
     Parameters
     ----------
-    states: dict name -> array
-        The image states, all the same shape
+    states: dict
+        name -> image state, all the same shape
     vexp: VisitExposure
         For the good mask and the noise
     stars: structured array
@@ -224,10 +290,12 @@ def measure_profiles(states, vexp, stars, seg, gmax=17.0, mode='r',
 
     Returns
     -------
-    edges, table: the annulus edges and a structured array with
-    one row per (star, state): idx, G, x, y, state, prof
-    (sky-sigma units, ambient-referenced), npix, local (the
-    local reference level, NaN when unmeasurable), nlocal
+    edges: array
+        The annulus edges
+    table: structured array
+        One row per (star, state): idx, G, x, y, state, prof
+        (sky-sigma units, ambient-referenced), npix, local (the
+        local reference level, NaN when unmeasurable), nlocal
     """
     if edges is not None:
         edges = np.asarray(edges, dtype='f8')
@@ -290,13 +358,29 @@ def measure_profiles(states, vexp, stars, seg, gmax=17.0, mode='r',
 def stack_profiles(table, state, glo, ghi, min_stars=2,
                    normalize=True):
     """
-    the median over stars in [glo, ghi) of the profile for one
-    state, in sky-sigma units, divided by 10^(-0.4 G) when
-    normalize is set; NaN where fewer than min_stars contribute
+    Stack the profiles of one state over a G slice.
+
+    The median over stars in [glo, ghi), in sky-sigma units,
+    divided by 10^(-0.4 G) when normalize is set.
+
+    Parameters
+    ----------
+    table: structured array
+        From measure_profiles
+    state: str
+    glo, ghi: float
+        The G range [glo, ghi)
+    min_stars: int, optional
+        Annuli with fewer contributing stars are NaN
+    normalize: bool, optional
+        Divide each profile by its star's Gaia flux
 
     Returns
     -------
-    med, count
+    med: array
+        The median per annulus
+    count: int array
+        The stars contributing per annulus
     """
     w = (
         (table['state'] == state)

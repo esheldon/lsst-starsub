@@ -1,5 +1,5 @@
 """
-output files and the summary plot
+The output files of the visit and clean tools, and their summary plot.
 """
 import numpy as np
 
@@ -7,9 +7,30 @@ import numpy as np
 def write_visit_file(fname, vexp, res, states, edges, ptable,
                      meta, dmask=None):
     """
-    the per-detector output: image states, mask planes, the
-    census with amplitudes, the profile table, and the
-    background layers as delivered by the pipeline
+    Write the per-detector output file of the visit tool.
+
+    The image states, mask planes, the census with amplitudes, the
+    profile table, and the background layers as delivered by the
+    pipeline.
+
+    Parameters
+    ----------
+    fname: str
+        The output file
+    vexp: VisitExposure
+        The exposure, for its stored layers, mask and variance
+    res: dict
+        From handle_stars_visit
+    states: dict
+        name -> image state
+    edges: array
+        The profile annulus edges
+    ptable: structured array
+        The per-star profile table
+    meta: dict
+        The run identity, written as a one-row table
+    dmask: (dedges, dtable), optional
+        The d - r_mask profile edges and table
 
     Extensions
     ----------
@@ -81,10 +102,26 @@ def write_visit_file(fname, vexp, res, states, edges, ptable,
 def write_profiles_file(fname, dedges, dtable, meta, star_table=None,
                         rtable=None):
     """
-    the small per-detector output: the d - r_mask profile table
-    and edges (as lsst-starsub-remeasure writes them, read by
-    lsst-starsub-stack), the run meta, and optionally the
-    census with amplitudes and the radial profile table
+    Write the small per-detector output: the profiles alone.
+
+    The d - r_mask profile table and edges (read by
+    lsst-starsub-stack), the run meta, and optionally the census with
+    amplitudes and the radial profile table.
+
+    Parameters
+    ----------
+    fname: str
+        The output file
+    dedges: array
+        The d - r_mask annulus edges
+    dtable: structured array
+        The per-star d - r_mask profile table
+    meta: dict
+        The run identity, written as a one-row table
+    star_table: structured array, optional
+        The census with amplitudes
+    rtable: (edges, ptable), optional
+        The radial profile edges and table
     """
     import rustfits
 
@@ -106,6 +143,18 @@ def write_profiles_file(fname, dedges, dtable, meta, star_table=None,
 
 
 def _meta_table(meta):
+    """
+    Turn a meta dict into a one-row table.
+
+    Parameters
+    ----------
+    meta: dict
+        name -> bool, int, float or str
+
+    Returns
+    -------
+    table: structured array
+    """
     dtype = []
     for k, v in meta.items():
         if isinstance(v, bool):
@@ -124,8 +173,25 @@ def _meta_table(meta):
 
 def plot_summary(png, vexp, res, states, edges, ptable):
     """
-    the stacked flux-normalized profiles per state in two G
-    slices, and the brightest on-image star in each state
+    Plot the summary: stacked profiles per state and the brightest star.
+
+    The stacked flux-normalized profiles per state in G slices, and
+    the brightest on-image star in each state.
+
+    Parameters
+    ----------
+    png: str
+        The output file
+    vexp: VisitExposure
+        The exposure
+    res: dict
+        From handle_stars_visit
+    states: dict
+        name -> image state
+    edges: array
+        The profile annulus edges
+    ptable: structured array
+        The per-star profile table
     """
     import matplotlib
     matplotlib.use('Agg')

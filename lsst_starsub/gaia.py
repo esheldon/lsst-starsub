@@ -40,10 +40,25 @@ GAIA_ADQL = (
 
 def fetch_gaia(wcs, bbox, gmax=GMAX):
     """
-    Gaia DR3 extract for this patch from the ESA TAP sync
-    service (a few seconds), as a numpy structured array:
-    circle centered on the patch, corner radius plus margin
-    for off-patch intruders
+    Fetch the Gaia DR3 stars of a patch from the TAP service.
+
+    A sync query (a few seconds) of the circle centered on the patch,
+    of corner radius plus a margin for the off-patch intruders, tried
+    on each of GAIA_TAP_URLS in turn.
+
+    Parameters
+    ----------
+    wcs: ButlerWcs or FileWcs
+        For the patch's sky position
+    bbox: box
+        The patch's bounding box
+    gmax: float, optional
+        Stars brighter than this; default GMAX
+
+    Returns
+    -------
+    gaia: structured array
+        ra, dec, pmra, pmdec, phot_g_mean_mag, ruwe, sorted by G
     """
     import io
     import urllib.request
@@ -107,19 +122,34 @@ def fetch_gaia(wcs, bbox, gmax=GMAX):
 
 def read_gaia_file(fname, wcs, bbox, gmax=GMAX):
     """
-    gaia stars for this patch from a file, converted to the
-    fetch_gaia layout so everything downstream is unchanged.
-    The same circle as the TAP query is applied, plus the gmax
-    cut.
+    Read the Gaia stars of a patch from a file.
 
-    FITS files (lsst-starsub-make-gaia output, or any with a table
-    in the first extension) are read with rustfits, parquet
-    files with pandas.  Required columns are ra, dec (degrees)
-    and a G magnitude, phot_g_mean_mag or gaia_g_mag.  Proper
-    motions pmra, pmdec (mas/yr, pmra including cos(dec)) are
-    used when present, else set to zero and the positions used
-    as given.  ruwe is not carried by the files and is set to 1
-    (the template astrometric-quality guard passes everything)
+    Converted to the fetch_gaia layout so everything downstream is
+    unchanged; the same circle as the TAP query is applied, plus the
+    gmax cut.  FITS files (lsst-starsub-make-gaia output, or any with
+    a table in the first extension) are read with rustfits, parquet
+    files with pandas.  Required columns are ra, dec (degrees) and a
+    G magnitude, phot_g_mean_mag or gaia_g_mag.  Proper motions pmra,
+    pmdec (mas/yr, pmra including cos(dec)) are used when present,
+    else set to zero and the positions used as given.  ruwe is not
+    carried by the files and is set to 1 (the template
+    astrometric-quality guard passes everything).
+
+    Parameters
+    ----------
+    fname: str
+        The file
+    wcs: ButlerWcs or FileWcs
+        For the patch's sky position
+    bbox: box
+        The patch's bounding box
+    gmax: float, optional
+        Stars brighter than this; default GMAX
+
+    Returns
+    -------
+    gaia: structured array
+        As fetch_gaia
     """
     if fname.endswith('.parq') or fname.endswith('.parquet'):
         import pandas as pd
@@ -160,9 +190,31 @@ def gaia_from_columns(
     ra, dec, gmag, wcs, bbox, gmax=GMAX, pmra=None, pmdec=None,
 ):
     """
-    build the fetch_gaia structured layout from plain position
-    and magnitude arrays, applying the same patch circle as the
-    TAP query and the gmax cut.  Proper motions are optional
+    Build the fetch_gaia layout from plain position and magnitude arrays.
+
+    The same patch circle as the TAP query and the gmax cut are
+    applied.
+
+    Parameters
+    ----------
+    ra, dec: arrays
+        Degrees
+    gmag: array
+        Gaia G
+    wcs: ButlerWcs or FileWcs
+        For the patch's sky position
+    bbox: box
+        The patch's bounding box
+    gmax: float, optional
+        Stars brighter than this; default GMAX
+    pmra, pmdec: arrays, optional
+        Proper motions, mas/yr, pmra including cos(dec); zero when
+        absent
+
+    Returns
+    -------
+    gaia: structured array
+        As fetch_gaia
     """
     xmid = 0.5 * (bbox.x.start + bbox.x.stop)
     ymid = 0.5 * (bbox.y.start + bbox.y.stop)
@@ -204,8 +256,23 @@ def gaia_from_columns(
 
 def gaia_pixel_positions(gaia, wcs, bbox):
     """
-    patch-frame pixel positions with proper motions propagated
-    to the observation epoch
+    Get the stars' patch-frame pixel positions at the observation epoch.
+
+    The proper motions are propagated from GAIA_EPOCH to OBS_EPOCH.
+
+    Parameters
+    ----------
+    gaia: structured array
+        The extract (fetch_gaia layout)
+    wcs: ButlerWcs or FileWcs
+        The image's wcs
+    bbox: box
+        The image's bounding box
+
+    Returns
+    -------
+    x, y: arrays
+        Pixel positions relative to the box origin
     """
     dt = OBS_EPOCH - GAIA_EPOCH
     pmra = np.nan_to_num(gaia['pmra'])
@@ -220,11 +287,21 @@ def gaia_pixel_positions(gaia, wcs, bbox):
 
 def fetch_gaia_or_none(wcs, bbox, gmax=GMAX, require=False):
     """
-    fetch_gaia with failure handling: when require is set a
-    failure raises (never proceed silently without stars when
-    the caller asked for star handling); otherwise the error
-    is printed and None returned so the caller can degrade
-    gracefully
+    Fetch the Gaia stars of a patch, or report the failure.
+
+    Parameters
+    ----------
+    wcs, bbox, gmax:
+        As fetch_gaia
+    require: bool, optional
+        Raise on failure (never proceed silently without stars when
+        the caller asked for star handling); otherwise the error is
+        printed and None returned so the caller can degrade
+        gracefully
+
+    Returns
+    -------
+    gaia: structured array or None
     """
     try:
         return fetch_gaia(wcs, bbox, gmax=gmax)

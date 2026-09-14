@@ -94,13 +94,13 @@ MESH_SMOOTH_DELTA = 0.1
 SEG_DIFFUSE_MEDIAN = 1.6
 SEG_DIFFUSE_BW = 32   # px
 RENDER_BLOCK = 256  # rows per block when rendering the mesh
-PRIOR_SIGMA = 0.3   # the amplitude prior about the prediction (A = 1):
-                    # the colour scatter of the i-band to Gaia G flux
-                    # ratio; isolated stars are constrained 10x better
-                    # by their pixels, close pairs, edge stars and the
-                    # whole-patch wings of the brightest stars are not
-                    # (3 percent of the amplitudes were negative
-                    # without it, pass 1 of the broad calibration)
+# the amplitude prior about the prediction (A = 1): the colour
+# scatter of the i-band to Gaia G flux ratio; isolated stars are
+# constrained 10x better by their pixels, close pairs, edge stars
+# and the whole-patch wings of the brightest stars are not (3
+# percent of the amplitudes were negative without it, pass 1 of
+# the broad calibration)
+PRIOR_SIGMA = 0.3
 
 
 def make_kernel(detect_settings=None):
@@ -685,7 +685,9 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
         F = (X.T @ W @ X).toarray()
         rhs = X.T @ (w * mean.ravel())
         # a tiny ridge on the mesh keeps unsupported nodes finite
-        F[nfree:, nfree:] += np.eye(F.shape[0] - nfree) * 1e-6 * w.sum() / ncell
+        F[nfree:, nfree:] += (
+            np.eye(F.shape[0] - nfree) * 1e-6 * w.sum() / ncell
+        )
         if smooth is not None:
             F[nfree:, nfree:] += smooth
         # and on the amplitudes, at a level far below any star's
@@ -730,8 +732,9 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
         )
         del resid
         if verbose:
-            print(f'    segmentation excludes {seg_excl[good].mean() * 100:.1f} '
-                  f'percent of the good pixels')
+            print(f'    segmentation excludes '
+                  f'{seg_excl[good].mean() * 100:.1f} percent of the '
+                  f'good pixels')
 
     del work
     # the node uncertainties, sky_sigma^2 F^-1 with the priors in

@@ -107,7 +107,17 @@ NROUND = 2
 
 def iq_tier(score):
     """
-    the IQ tier name of a shapelets IQ score (nan -> 'unknown')
+    Name the IQ tier of a shapelets IQ score.
+
+    Parameters
+    ----------
+    score: float
+        The shapelets IQ score; nan gives 'unknown'
+
+    Returns
+    -------
+    name: str
+        From IQ_TIERS, or 'unknown'
     """
     if not np.isfinite(score):
         return 'unknown'
@@ -119,10 +129,11 @@ def iq_tier(score):
 
 def convert_mask(mask_array, plane_dict):
     """
-    the afw mask plane image as a coadd-convention (ny, nx, 1)
-    mask: DM_NO_DATA for the unusable planes, DM_SAT for
-    saturation, DM_INTRP for the interpolated pixels (CR
-    included).  Planes absent from plane_dict are ignored
+    Convert an afw mask plane image to the coadd convention.
+
+    DM_NO_DATA for the unusable planes, DM_SAT for saturation,
+    DM_INTRP for the interpolated pixels (CR included).  Planes
+    absent from plane_dict are ignored.
 
     Parameters
     ----------
@@ -133,9 +144,10 @@ def convert_mask(mask_array, plane_dict):
 
     Returns
     -------
-    (ny, nx, 1) int32 array
+    mask: (ny, nx, 1) int32 array
     """
     def bits(names):
+        """The bit mask of the named planes present in plane_dict."""
         val = 0
         for name in names:
             if name in plane_dict:
@@ -155,21 +167,39 @@ def convert_mask(mask_array, plane_dict):
 
 
 class _Plane(object):
-    """a plane with the .array attribute the starsub code reads"""
+    """A plane with the .array attribute the starsub code reads."""
     def __init__(self, arr):
         self.array = arr
 
 
 class _AfwPsf(object):
     """
-    the afw psf presenting the lsst.images compute_kernel_image
-    interface used by starsub.measure_coadd_fwhm; positions are
-    detector-frame pixels
+    An afw psf presenting the lsst.images compute_kernel_image interface.
+
+    As stamps.measure_coadd_fwhm uses it; positions are detector-frame
+    pixels.
+
+    Parameters
+    ----------
+    afw_psf: lsst.afw.detection.Psf
     """
     def __init__(self, afw_psf):
         self._psf = afw_psf
 
     def compute_kernel_image(self, x, y):
+        """
+        Evaluate the psf kernel image at a position.
+
+        Parameters
+        ----------
+        x, y: float
+            Detector-frame pixel position
+
+        Returns
+        -------
+        image: _Plane
+            The kernel image as an object with .array (f8)
+        """
         import lsst.geom
         kim = self._psf.computeKernelImage(
             lsst.geom.Point2D(float(x), float(y)),
@@ -179,20 +209,40 @@ class _AfwPsf(object):
 
 class VisitExposure(object):
     """
-    one detector of a visit as the deep_coadd-like object the
-    starsub code works on: image/variance/mask planes with
-    .array, bbox with .x/.y start/stop (detector frame, origin
-    0), band, psf, a noise realization drawn from the variance,
-    and the stored background layers rendered in nJy in
-    .backgrounds, keyed
+    One detector of a visit as the deep_coadd-like object the code works on.
+
+    Image/variance/mask planes with .array, bbox with .x/.y
+    start/stop (detector frame, origin 0), band, psf, a noise
+    realization drawn from the variance, and the stored background
+    layers rendered in nJy in .backgrounds, keyed
 
         initial_coarse  the 128 px layer of the initial model
         initial_fine    the 32 px layer (the wing absorber)
         skycorr         the visit-level sky correction (not in
                         the delivered image; in the warps)
 
-    Built by load_visit_exposure; the plain constructor takes
-    arrays so the stack-free tests can build one
+    Built by load_visit_exposure; the plain constructor takes arrays
+    so the stack-free tests can build one.
+
+    Parameters
+    ----------
+    image, variance: (ny, nx) arrays
+        Stored as f4
+    mask: (ny, nx, 1) int array
+        In the coadd convention (convert_mask)
+    band: str
+    backgrounds: dict
+        The stored layers rendered in nJy, keyed as above
+    psf: object, optional
+        With compute_kernel_image(x, y) (_AfwPsf)
+    wcs: ButlerWcs, optional
+    visit, detector: int, optional
+    calib: float, optional
+        nJy per ADU of the preliminary image
+    noise: (ny, nx) array, optional
+        The noise realization; drawn from the variance when None
+    rng: numpy Generator, optional
+        For the noise draw
     """
 
     def __init__(self, image, variance, mask, band, backgrounds,
@@ -227,7 +277,7 @@ class VisitExposure(object):
 
     @property
     def sky_level(self):
-        """median of the initial model, nJy"""
+        """The median of the initial background model, nJy."""
         bg = self.backgrounds
         return float(np.nanmedian(
             bg['initial_coarse'] + bg['initial_fine'],
@@ -235,14 +285,14 @@ class VisitExposure(object):
 
     @property
     def sky_sigma(self):
-        """median pixel noise, nJy"""
+        """The median pixel noise, nJy."""
         var = self.variance.array
         good = np.isfinite(var) & (var > 0)
         return float(np.sqrt(np.median(var[good])))
 
     @property
     def good(self):
-        """usable pixels: finite positive variance, not NO_DATA"""
+        """The usable pixels: finite positive variance, not NO_DATA."""
         var = self.variance.array
         mask0 = self.mask.array[:, :, 0]
         return (
@@ -253,19 +303,20 @@ class VisitExposure(object):
 
 def restore_background(vexp, which='initial'):
     """
-    add stored background layers back to the image in place
+    Add stored background layers back to the image in place.
 
     Parameters
     ----------
     vexp: VisitExposure
-    which: str
+    which: str, optional
         'initial' both layers of the initial model (the raw sky
         image); 'fine' the 32 px layer only (the coarse sky stays
         out, the wings come back); 'none' nothing
 
     Returns
     -------
-    the array added (zeros for 'none')
+    added: array
+        The array added (zeros for 'none')
     """
     bg = vexp.backgrounds
     if which == 'initial':
@@ -288,9 +339,20 @@ def restore_background(vexp, which='initial'):
 
 def build_wide_star_mask(stars, shape):
     """
-    the sky-pass exclusion: every census star out to its
-    template extent when brighter than WIDE_GMAX, else its mask
-    circle plus WIDE_GROW.  Bool array of the given shape
+    Build the sky-pass exclusion mask.
+
+    Every census star out to its template extent when brighter than
+    WIDE_GMAX, else its mask circle plus WIDE_GROW.
+
+    Parameters
+    ----------
+    stars: structured array
+        The census
+    shape: (ny, nx)
+
+    Returns
+    -------
+    wide: bool array
     """
     ny, nx = shape
     wide = np.zeros((ny, nx), dtype=bool)
@@ -316,9 +378,10 @@ def build_wide_star_mask(stars, shape):
 
 def sky_background(vexp, exclude, bw):
     """
-    mask-aware sep background of the current image, subtracted
-    in place and returned.  Detections (1.5 sigma segmentation)
-    and the exclusion zone stay out of the boxes
+    Subtract a mask-aware sep background from the image in place.
+
+    Detections (1.5 sigma segmentation) and the exclusion zone stay
+    out of the boxes.
 
     Parameters
     ----------
@@ -330,7 +393,8 @@ def sky_background(vexp, exclude, bw):
 
     Returns
     -------
-    the background array subtracted
+    back: array
+        The background subtracted
     """
     import sep
 
@@ -356,7 +420,19 @@ def sky_background(vexp, exclude, bw):
 
 
 def star_model_image(shape, slist):
-    """the summed star model of a subtract_stars work list"""
+    """
+    Sum the star model of a subtract_stars work list.
+
+    Parameters
+    ----------
+    shape: (ny, nx)
+    slist: list of dict
+        The work list, with sl, A and T per star
+
+    Returns
+    -------
+    model: array
+    """
     model = np.zeros(shape, dtype='f4')
     for st in slist:
         if st['A'] > 0:
@@ -369,20 +445,20 @@ def handle_stars_visit(vexp, gaia, gsub=GSUB, restore='initial',
                        star_model='template', canonical=None,
                        joint_spacing=None, joint_prior=None):
     """
-    the joint star-wing and sky characterization of one detector
+    Run the joint star-wing and sky characterization of one detector.
 
-    census and star mask as on the coadds; restoration of the
+    Census and star mask as on the coadds; restoration of the
     stored background layers; then nround rounds of: sky pass
     (wide boxes with the stars excluded to their template
     extents in the first round, PRE_BW boxes with the plain
     star-mask margin after), template build and joint amplitude
-    solve (starsub.subtract_stars) on the sky-flattened image.
+    solve (stamps.subtract_stars) on the sky-flattened image.
     Each round after the first re-adds the previous star model
     before the sky pass so the amplitudes are re-anchored on
     the refined sky rather than on their own residuals.  A last
     PRE_BW sky pass on the star-free image finishes.
 
-    The image ends star-subtracted and sky-subtracted in place
+    The image ends star-subtracted and sky-subtracted in place.
 
     Parameters
     ----------
@@ -421,7 +497,7 @@ def handle_stars_visit(vexp, gaia, gsub=GSUB, restore='initial',
 
     Returns
     -------
-    dict with
+    res: dict
         stars, star_table, starmask, dstar, slist, fwhm,
         restored (array added back), sky (total sky model
         subtracted, nJy), star_model (the summed star model),
@@ -526,14 +602,35 @@ def handle_stars_visit(vexp, gaia, gsub=GSUB, restore='initial',
 # ---------------------------------------------------------------
 
 def make_visit_butler(repo=VISIT_REPO, collection=VISIT_COLLECTION):
+    """
+    Make a butler on the visit repo.
+
+    Parameters
+    ----------
+    repo: str, optional
+    collection: str, optional
+
+    Returns
+    -------
+    butler: lsst.daf.butler.Butler
+    """
     from lsst.daf.butler import Butler
     return Butler(repo, collections=[collection])
 
 
 def load_iq_scores(butler):
     """
-    (visit, detector) -> shapelets IQ score from
-    visit_detector_table; empty when the run lacks the column
+    Load the shapelets IQ scores of the run.
+
+    Parameters
+    ----------
+    butler: lsst.daf.butler.Butler
+
+    Returns
+    -------
+    iq: dict
+        (visit, detector) -> shapelets IQ score from
+        visit_detector_table; empty when the run lacks the column
     """
     t = butler.get(
         'visit_detector_table', dataId=dict(instrument=INSTRUMENT),
@@ -551,14 +648,14 @@ def load_iq_scores(butler):
 
 def select_coadd_inputs(butler, tract, patch, band, iq=None):
     """
-    the visit-detectors that went into the coadd of a patch
-    (deep_coadd_input_summary_tract: the IQ-selected inputs),
-    with the shapelets IQ score when a lookup is given, best
-    first
+    Select the visit-detectors that went into the coadd of a patch.
+
+    From deep_coadd_input_summary_tract (the IQ-selected inputs),
+    with the shapelets IQ score when a lookup is given, best first.
 
     Parameters
     ----------
-    butler: Butler
+    butler: lsst.daf.butler.Butler
     tract, patch: int
     band: str
     iq: dict, optional
@@ -567,8 +664,9 @@ def select_coadd_inputs(butler, tract, patch, band, iq=None):
 
     Returns
     -------
-    structured array visit, detector, weight, goodpix, iq_score
-    sorted by iq_score (nan last)
+    inputs: structured array
+        visit, detector, weight, goodpix, iq_score, sorted by
+        iq_score (nan last)
     """
     t = butler.get(
         'deep_coadd_input_summary_tract',
@@ -602,11 +700,24 @@ def select_coadd_inputs(butler, tract, patch, band, iq=None):
 
 def render_background_list(bglist, layers, calib):
     """
-    the sum of the selected layers of an afw BackgroundList as
-    an f4 array in nJy (the stored layers are ADU), rendered
-    exactly as BackgroundList.getImage does: a layer with an
-    approximation style set renders from its stored polynomial,
-    otherwise by interpolating its bin statistics
+    Render the sum of selected layers of an afw BackgroundList.
+
+    Rendered exactly as BackgroundList.getImage does: a layer with
+    an approximation style set renders from its stored polynomial,
+    otherwise by interpolating its bin statistics.
+
+    Parameters
+    ----------
+    bglist: lsst.afw.math.BackgroundList
+    layers: iterable of int
+        The layer indices to sum
+    calib: float
+        nJy per ADU (the stored layers are ADU)
+
+    Returns
+    -------
+    image: f4 array
+        In nJy
     """
     from lsst.afw.math import ApproximateControl
 
@@ -622,7 +733,15 @@ def render_background_list(bglist, layers, calib):
 
 
 def describe_background_list(bglist, name):
-    """print the layer structure: bins, approximation, order"""
+    """
+    Print the layer structure of a BackgroundList: bins, approximation, order.
+
+    Parameters
+    ----------
+    bglist: lsst.afw.math.BackgroundList
+    name: str
+        A label for the printout
+    """
     for i, (bg, interp, undersample, approx, ox, oy, _) in enumerate(
         bglist
     ):
@@ -636,17 +755,23 @@ def describe_background_list(bglist, name):
 
 def load_visit_exposure(butler, visit, detector, rng=None):
     """
-    one detector of a visit from the butler as a VisitExposure:
-    the delivered visit_image (nJy) with the stored background
-    layers rendered in nJy
+    Load one detector of a visit from the butler as a VisitExposure.
+
+    The delivered visit_image (nJy) with the stored background
+    layers rendered in nJy.
 
     Parameters
     ----------
-    butler: Butler
+    butler: lsst.daf.butler.Butler
         With the collection set (VISIT_COLLECTION)
     visit, detector: int
     rng: numpy Generator, optional
         For the noise realization
+
+    Returns
+    -------
+    vexp: VisitExposure
+        With the afw exposure kept in .exposure
     """
     from ..geom import ButlerWcs
 
@@ -753,8 +878,20 @@ def load_visit_exposure(butler, visit, detector, rng=None):
 
 def load_gaia_for_exposure(vexp, gaia_file=None, gmax=None):
     """
-    the gaia extract covering the detector, from a file
-    (lsst_starsub.gaia.read_gaia_file layout) or the TAP query
+    Get the Gaia extract covering a detector.
+
+    Parameters
+    ----------
+    vexp: VisitExposure
+    gaia_file: str, optional
+        A file in the lsst_starsub.gaia.read_gaia_file layout;
+        the TAP query when None
+    gmax: float, optional
+        The depth; default lsst_starsub.gaia.GMAX
+
+    Returns
+    -------
+    gaia: structured array
     """
     from ..gaia import GMAX, fetch_gaia, read_gaia_file
 

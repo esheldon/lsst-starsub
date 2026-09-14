@@ -7,6 +7,13 @@ the cell coadd the visit_summary and the stored visit background
 
 
 def get_args():
+    """
+    Parse the command line.
+
+    Returns
+    -------
+    args: argparse.Namespace
+    """
     import argparse
     from . import add_butler_arguments
 
@@ -19,6 +26,9 @@ def get_args():
 
 
 def main():
+    """
+    Report which datasets a butler holds for a patch.
+    """
     from ..coadd.cellcoadd import coadd_data_id
     from ..site import INSTRUMENT
     from ..visit.exposure import make_visit_butler

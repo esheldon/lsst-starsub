@@ -27,6 +27,13 @@ RENDER_BLOCK = 256
 class WingModel(object):
     """
     The radial wing shape shared by every star.
+
+    Parameters
+    ----------
+    r: array
+        Radii in px
+    T: array
+        The wing at r, nJy per unit Gaia flux, core included
     """
     def __init__(self, r, T):
         self.r = np.asarray(r, dtype='f8')
@@ -38,6 +45,15 @@ class WingModel(object):
 
         The same for every star; G is accepted so a model with a
         magnitude term can take its place.
+
+        Parameters
+        ----------
+        G: float, optional
+            The star's Gaia G, unused
+
+        Returns
+        -------
+        r, T: arrays
         """
         return self.r, self.T
 
@@ -67,6 +83,15 @@ def profile_of(canonical, G=None):
 def read_wing_model(fname):
     """
     Read a wing file into a WingModel.
+
+    Parameters
+    ----------
+    fname: str
+        The wing file (write_canonical_wing)
+
+    Returns
+    -------
+    wing: WingModel
     """
     r, T = read_canonical_wing(fname)
     return WingModel(r, T)
@@ -75,17 +100,19 @@ def read_wing_model(fname):
 def render_wing_image(shape, x, y, gmag, rt, k_in, calib,
                       gmax=RENDER_GMAX, eps=RENDER_EPS, amps=None):
     """
-    the summed star image (ADU) on a detector from the radial
-    template
+    Render the summed star image of an image from a radial wing.
+
+    Each star is 10^(-0.4 G) k_in T(r) / calib times its amplitude,
+    drawn out to the radius where it falls below eps.
 
     Parameters
     ----------
     shape: (ny, nx)
+        The image shape
     x, y, gmag: arrays
-        Detector-frame positions and Gaia G of the stars
-    rt: (r, T), or an object with .profile(G) -> (r, T)
-        From radial_template, or a lsst_starsub.wing.WingModel
-        with a magnitude term
+        Image-frame positions and Gaia G of the stars
+    rt: (r, T) or WingModel
+        The radial wing (profile_of)
     k_in: float
         nJy per unit gaia flux per template unit
     calib: float
@@ -100,7 +127,10 @@ def render_wing_image(shape, x, y, gmag, rt, k_in, calib,
 
     Returns
     -------
-    image (ny, nx) f4, and the number of stars rendered
+    image: array (ny, nx) f4
+        The summed star image
+    n: int
+        The number of stars rendered
     """
     ny, nx = shape
     image = np.zeros((ny, nx), dtype='f4')
@@ -139,10 +169,29 @@ def render_wing_image(shape, x, y, gmag, rt, k_in, calib,
 def render_canonical_stars(shape, stars, canonical, gsub=None, amps=None,
                            verbose=True):
     """
-    the census stars' images (nJy) from the canonical wing, a pure
-    prediction: 10^(-0.4 G) T(r) with T in nJy per unit Gaia flux,
-    times the per-star amplitudes when given; gsub renders the stars
-    brighter than it, None every star
+    Render the census stars from the canonical wing, in nJy.
+
+    The pure prediction 10^(-0.4 G) T(r), with T in nJy per unit Gaia
+    flux, times the per-star amplitudes when given.
+
+    Parameters
+    ----------
+    shape: (ny, nx)
+        The image shape
+    stars: structured array
+        The census, with x, y and G
+    canonical: (r, T) or WingModel
+        The wing
+    gsub: float, optional
+        Render the stars brighter than this; None for every star
+    amps: array, optional
+        Per-star amplitude factors, 1 the prediction
+    verbose: bool, optional
+        Print the number rendered and the peak
+
+    Returns
+    -------
+    image: array (ny, nx) f4
     """
     image, n = render_wing_image(
         shape, stars['x'], stars['y'], stars['G'], canonical, 1.0, 1.0,
@@ -155,6 +204,21 @@ def render_canonical_stars(shape, stars, canonical, gsub=None, amps=None,
 
 
 def write_canonical_wing(fname, r, T, band, nvisit):
+    """
+    Write a canonical wing file.
+
+    Parameters
+    ----------
+    fname: str
+        The output file
+    r, T: arrays
+        The wing, nJy per unit Gaia flux at radius r px
+    band: str
+        The band, recorded in the header
+    nvisit: int
+        The number of visits the wing was pooled from, recorded in
+        the header
+    """
     import rustfits
 
     tab = np.zeros(r.size, dtype=[('r', 'f8'), ('T', 'f8')])
@@ -165,6 +229,19 @@ def write_canonical_wing(fname, r, T, band, nvisit):
 
 
 def read_canonical_wing(fname):
+    """
+    Read a canonical wing file.
+
+    Parameters
+    ----------
+    fname: str
+        The wing file
+
+    Returns
+    -------
+    r, T: arrays
+        The wing, nJy per unit Gaia flux at radius r px
+    """
     import rustfits
 
     with rustfits.FITS(fname) as fits:

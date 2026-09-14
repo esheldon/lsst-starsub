@@ -55,9 +55,10 @@ SEG_PIXSTACK_MAX = int(3.2e7)
 
 def circle_radius(gmag):
     """
-    the mask circle radius law
+    Get the mask circle radius of a star from its magnitude.
 
-     magnitude-scaled with a floor and a cap
+    MASK_R15 at G = 15, scaled as 10^(MASK_SLOPE (15 - G)), floored at
+    MINRAD and capped at MASK_RMAX.
 
     Parameters
     ----------
@@ -66,7 +67,8 @@ def circle_radius(gmag):
 
     Returns
     -------
-    radius in pixels, same shape as gmag
+    radius: float or array
+        In pixels, the shape of gmag
     """
 
     return np.minimum(
@@ -80,14 +82,13 @@ def circle_radius(gmag):
 
 def select_stars(gaia, x, y, mask0, gsub=GSUB, verbose=True):
     """
-    Select on-patch stars that are saturated or brighter than gsub
+    Select the census: on-patch stars saturated or brighter than gsub.
 
-    WE do not apply a RUWE guard.  Gaia at these depths is essentially pure
-    point sources, and high-RUWE binaries are still stars we want gone.
-
-    Also include off-patch intruders bright enough for their wings to reach in
-
-    Referred to as "the subtract-and-mask census" in various places
+    Off-patch stars brighter than GSAT within STAR_MARGIN px of the
+    image, whose wings reach in, are included as intruders.  No RUWE
+    guard: Gaia at these depths is essentially pure point sources, and
+    high-RUWE binaries are still stars we want gone.  Referred to as
+    "the subtract-and-mask census" in various places.
 
     Parameters
     ----------
@@ -200,6 +201,13 @@ def patch_census(gaia, wcs, bbox, mask0, gsub=GSUB, coadd=False, verbose=True):
 
 
 def _get_select_stars_dtype():
+    """
+    Get the dtype of the census table.
+
+    Returns
+    -------
+    dtype: list of (name, type)
+    """
     return [
         ('ra', 'f8'),
         ('dec', 'f8'),
@@ -214,9 +222,10 @@ def _get_select_stars_dtype():
 
 def own_component_ids(comps, ix, iy):
     """
-    get labels of the flagged mask components at and around a star's integer
-    position, sampled at +-2 px so a slightly displaced flag still counts as
-    the star's own
+    Get the labels of the flagged mask components at a star.
+
+    Sampled at the star's integer position and +-2 px around it, so a
+    slightly displaced flag still counts as the star's own.
 
     Parameters
     ----------
@@ -227,7 +236,8 @@ def own_component_ids(comps, ix, iy):
 
     Returns
     -------
-    set of int component labels (possibly empty)
+    ids: set of int
+        The component labels, possibly empty
     """
     ny, nx = comps.shape
 
@@ -247,8 +257,10 @@ def own_component_ids(comps, ix, iy):
 
 def build_star_mask(stars, mask0, verbose=True, coadd=False):
     """
-    Get floored magnitude-scaled circles at every census star plus the
-    flagged components of the saturated ones
+    Build the star mask: a circle per census star plus flagged components.
+
+    The circles follow circle_radius; the saturated stars also get the
+    flagged mask components at their positions.
 
     Parameters
     ----------
@@ -327,20 +339,21 @@ def build_star_mask(stars, mask0, verbose=True, coadd=False):
 
 def field_segmentation(image, good, sig):
     """
-    1.5 sigma sep segmentation map over the whole patch
+    Segment the sources of a whole image at 1.5 sigma.
 
     Parameters
     ----------
     image: array
-        The patch image
-    good: array
-        bool usable-pixel mask
+        The image
+    good: bool array
+        The usable pixels
     sig: float
         The pixel noise for the detection threshold
 
     Returns
     -------
-    the segmentation map (0 = sky)
+    seg: int array
+        The segmentation map, 0 for sky
     """
     imf = np.ascontiguousarray(image, dtype='f4')
     _, seg = sep_extract(imf, 1.5, sig, ~good, retry_deblend=True)
@@ -373,7 +386,7 @@ def sep_extract(imf, thresh, err, mask, retry_deblend=False, **kwargs):
         threshold exceeding the sub-object limit, seen on visit
         images) retry with a single deblend threshold, no
         sub-objects; for callers that only need the segmentation
-    **kwargs:
+    kwargs: dict
         Passed to sep.extract (filter_kernel, minarea, the deblend
         settings, ...)
 
@@ -417,21 +430,23 @@ def sep_extract(imf, thresh, err, mask, retry_deblend=False, **kwargs):
 
 def make_star_table(stars, slist):
     """
-    build the gaia_stars output table
+    Build the star table of the output file.
 
-    the census with the fitted per-band amplitude filled in for the stars that
-    received stamps
+    The census with the fitted amplitude A filled in for the stars that
+    received stamps, 0 for the others.
 
     Parameters
     ----------
     stars: structured array
         The census from select_stars
     slist: list of dict
-        The per-star work list from subtract_stars
+        The per-star work list from stamps.subtract_stars; empty for
+        a route that fills A itself
 
     Returns
     -------
-    structured array with the census fields plus A
+    star_table: structured array
+        The census fields plus A
     """
     star_table = np.zeros(len(stars), dtype=_get_star_table_dtype())
     for name in (
@@ -453,6 +468,13 @@ def make_star_table(stars, slist):
 
 
 def _get_star_table_dtype():
+    """
+    Get the dtype of the star table: the census fields plus A.
+
+    Returns
+    -------
+    dtype: list of (name, type)
+    """
     return [
         ('ra', 'f8'),
         ('dec', 'f8'),
@@ -468,19 +490,21 @@ def _get_star_table_dtype():
 
 def apply_star_taper(deep_coadd, dstar, width=APOD_STARS):
     """
-    apodize the star-mask regions
+    Apodize the star-mask regions of a coadd in place.
 
-    This occurs after any background determination, in both the image and the
-    noise realization so they stay statistically matched
+    The image and the noise realization are multiplied by
+    taper_from_distance, zero inside the mask and rising to one over
+    width px outside it, so they stay statistically matched.  Applied
+    after any background determination.
 
     Parameters
     ----------
     deep_coadd: deep_coadd
-        The coadd; image and noise are modified in place
+        The coadd; its image and noise realization are modified
     dstar: array
-        Distance from the star mask, patch frame
+        The distance from the star mask, patch frame
     width: float, optional
-        The taper width in pixels
+        The taper width in pixels; default APOD_STARS
     """
     taper = taper_from_distance(dstar, width)
     deep_coadd.image.array[:, :] *= taper
@@ -489,27 +513,24 @@ def apply_star_taper(deep_coadd, dstar, width=APOD_STARS):
 
 def make_starmask_plane(starmask, dstar, apod):
     """
-    build the three-valued starmask output plane
+    Build the three-valued star-mask plane of the output.
 
-    0 = clear,
-
-    1 = taper zone (attenuated -- masked for any measurement,
-    smooth enough for FFTs)
-
-    2 = star mask (zeroed when apod > 0)
+    0 clear; 1 the taper zone (attenuated: masked for any measurement,
+    smooth enough for FFTs); 2 the star mask (zeroed when apod > 0).
 
     Parameters
     ----------
-    starmask: array
-        The bool star mask
+    starmask: bool array
+        The star mask
     dstar: array
-        Distance from the star mask, patch frame
+        The distance from the star mask, patch frame
     apod: float
-        The taper width actually applied (0 = no taper zone)
+        The taper width actually applied; 0 for no taper zone
 
     Returns
     -------
-    u1 plane, same shape as starmask
+    plane: u1 array
+        The shape of starmask
     """
     plane = np.zeros(starmask.shape, dtype='u1')
 
@@ -523,10 +544,23 @@ def make_starmask_plane(starmask, dstar, apod):
 
 def taper_from_distance(dist, width):
     """
-    smooth taper as a function of distance into valid territory:
-    0 at dist=0, 1 at dist >= width, using the same cumulative
-    triweight kernel as the cell-edge apodization so star masks
-    and cell edges share one smoothness class
+    Get a smooth taper as a function of the distance into valid territory.
+
+    0 at distance 0, 1 at width and beyond, the cumulative triweight
+    kernel of the cell-edge apodization, so star masks and cell edges
+    share one smoothness class.
+
+    Parameters
+    ----------
+    dist: array
+        The distance into the valid region, px
+    width: float
+        The taper width, px
+
+    Returns
+    -------
+    taper: array
+        The shape of dist
     """
     y = (np.asarray(dist, dtype=float) - width) * (6.0 / width) + 3
     out = np.where(y > 3, 1.0, 0.0)
@@ -544,9 +578,22 @@ def taper_from_distance(dist, width):
 
 def diffuse_mask(starsub_fits, margin):
     """
-    the union over the bands of the joint fit's diffuse regions (the
-    large diffuse segments it did not mask as sources, the fit dicts'
-    'diffuse'), grown by margin px; None when there are none
+    Get the mask of the joint fit's diffuse regions, all bands, grown.
+
+    The union over the bands of the large diffuse segments the fit did
+    not mask as sources (the fit dicts' 'diffuse'), grown by margin px.
+
+    Parameters
+    ----------
+    starsub_fits: dict
+        The joint fit dicts, band -> fit
+    margin: float
+        The growth in px
+
+    Returns
+    -------
+    mask: bool array or None
+        None when no band has a diffuse region
     """
     from scipy import ndimage
 

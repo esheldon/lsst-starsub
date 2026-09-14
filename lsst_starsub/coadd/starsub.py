@@ -208,7 +208,8 @@ def load_wing(fname):
 
     Returns
     -------
-    WingModel, with the file name in its fname attribute
+    wing: WingModel
+        With the file name in its fname attribute
     """
     from ..wing import read_wing_model
 
@@ -389,6 +390,7 @@ def make_fit_tables(fits):
     ])
 
     def setting(fit, name):
+        """A setting of the fit dict, NaN where missing or None."""
         v = fit.get(name)
         return np.nan if v is None else v
 
@@ -459,9 +461,15 @@ def read_fit_tables(fname):
     """
     Read the fit tables from an output file.
 
+    Parameters
+    ----------
+    fname: str
+        The output file
+
     Returns
     -------
-    dict of extname -> structured array, as make_fit_tables
+    tables: dict
+        extname -> structured array, as make_fit_tables
     """
     import rustfits
 

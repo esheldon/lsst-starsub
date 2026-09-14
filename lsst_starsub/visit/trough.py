@@ -20,11 +20,12 @@ R_JOIN = 44.0
 
 def radial_template(tmpl):
     """
-    the template as a radial table (r, T) in core-normalized
-    template units: the denoised stack profile inside R_BLEND,
-    the analytic halo (inner law plus aureole) beyond R_JOIN,
-    a linear blend between, as extend_template_halo builds the
-    2-d array
+    Turn a pooled template into a radial table (r, T).
+
+    In core-normalized template units: the denoised stack profile
+    inside R_BLEND, the analytic halo (inner law plus aureole) beyond
+    R_JOIN, a linear blend between, as stamps.extend_template_halo
+    builds the 2-d array.
 
     Parameters
     ----------
@@ -33,7 +34,8 @@ def radial_template(tmpl):
 
     Returns
     -------
-    r, T: arrays, r from 0 to RENDER_RMAX
+    r, T: arrays
+        r from 0 to RENDER_RMAX
     """
     from .template import wing_law
 

@@ -48,7 +48,14 @@ def parse_plan(text):
     """
     Parse an injection plan string.
 
-    'glo-ghi:n,glo-ghi:n' -> [((glo, ghi), n), ...]
+    Parameters
+    ----------
+    text: str
+        'glo-ghi:n,glo-ghi:n': n stars per G range
+
+    Returns
+    -------
+    plan: list of ((glo, ghi), n)
     """
     plan = []
     for item in text.split(','):
@@ -62,13 +69,26 @@ def draw_positions(rng, plan, dstar, shape):
     """
     Draw random positions and magnitudes for the injected stars.
 
-    Random integer positions and magnitudes: the center clear
-    of existing masks, the star's mask circle plus EDGE_EXTRA
-    inside the image
+    Integer positions with the center more than CENTER_CLEAR px from
+    the existing masks and the star's mask circle plus EDGE_EXTRA
+    inside the image; the magnitudes uniform in each plan range.
+
+    Parameters
+    ----------
+    rng: numpy.random.RandomState
+    plan: list of ((glo, ghi), n)
+        From parse_plan
+    dstar: array
+        The distance from the existing star masks
+    shape: (ny, nx)
+        The image shape
 
     Returns
     -------
-    x, y (int arrays), G
+    x, y: int arrays
+        The positions
+    G: array
+        The magnitudes
     """
     from .census import circle_radius
 
@@ -100,12 +120,19 @@ def psf_cube(mcoadd):
     """
     Collect the per-cell psf images of a cell coadd.
 
-    The per-cell psf images of the cell coadd
+    Parameters
+    ----------
+    mcoadd: MultipleCellCoadd
+        The cell coadd
 
     Returns
     -------
-    cube (ny_cell, nx_cell, npsf, npsf), the grid's tract-frame
-    origin (x0, y0) and the cell size
+    cube: array (ny_cell, nx_cell, npsf, npsf)
+        The psf image per cell
+    origin: (x0, y0)
+        The grid's tract-frame origin
+    cell_size: int
+        The cell size in px
     """
     grid = mcoadd.grid
     shape = grid.shape
@@ -121,10 +148,20 @@ def psf_cube(mcoadd):
 
 def core_factor(psf, canonical):
     """
-    Scale a unit-sum psf to the canonical core flux.
+    Get the factor scaling a unit-sum psf to the canonical core flux.
 
-    The factor scaling the unit-sum psf so its sum within CORE_R
-    equals the canonical wing's
+    So that its sum within CORE_R equals the canonical wing's.
+
+    Parameters
+    ----------
+    psf: array
+        The psf image, unit sum, centered
+    canonical: (r, T) or WingModel
+        The wing
+
+    Returns
+    -------
+    factor: float
     """
     r, T = profile_of(canonical)
     c = (psf.shape[0] - 1) // 2
@@ -143,17 +180,35 @@ def render_injected(shape, x, y, G, canonical, cube, origin, cell_size,
     """
     Render the injected stars.
 
-    The summed injected-star image (nJy) and, per star, the
-    canonical core flux and the truth parameters
+    Each star is the module docstring's blend of its cell's psf core
+    and the canonical wing, at 10^(-0.4 G).
 
     Parameters
     ----------
-    shape: (ny, nx) of the patch image
-    x, y, G: arrays, patch-frame integer positions
-    canonical: (r, T)
-    cube, origin, cell_size: from psf_cube
-    bbox_start: (x0, y0) tract-frame origin of the patch image
-    wing_scale: float
+    shape: (ny, nx)
+        The patch image shape
+    x, y: int arrays
+        Patch-frame positions
+    G: array
+        Gaia G magnitudes
+    canonical: (r, T) or WingModel
+        The wing
+    cube, origin, cell_size:
+        From psf_cube
+    bbox_start: (x0, y0)
+        The tract-frame origin of the patch image
+    wing_scale: float, optional
+        The wing amplitude relative to the canonical, default 1
+    eps: float, optional
+        nJy: each star is rendered out to where its wing falls below
+        this; default EPS
+
+    Returns
+    -------
+    image: array (ny, nx) f4
+        The summed injected-star image, nJy
+    cores: array
+        Per star, the canonical core flux (the sum within CORE_R)
     """
     ny, nx = shape
     r, T = profile_of(canonical)
@@ -201,9 +256,25 @@ def render_injected(shape, x, y, G, canonical, cube, origin, cell_size,
 
 def census_rows(x, y, wcs, bbox_start, G, gaia_dtype):
     """
-    Build Gaia census rows for the injected stars.
+    Build Gaia rows for the injected stars, to add them to the census.
 
-    The injected stars as Gaia rows (proper motion 0, ruwe 1)
+    Parameters
+    ----------
+    x, y: arrays
+        Patch-frame positions
+    wcs: ButlerWcs or FileWcs
+        For the sky positions
+    bbox_start: (x0, y0)
+        The tract-frame origin of the patch image
+    G: array
+        Gaia G magnitudes
+    gaia_dtype: dtype
+        The extract's layout
+
+    Returns
+    -------
+    rows: structured array
+        Proper motion 0, ruwe 1
     """
     ra, dec = wcs.pixelToSkyArray(
         (x + bbox_start[0]).astype('f8'), (y + bbox_start[1]).astype('f8'),
@@ -220,6 +291,24 @@ def census_rows(x, y, wcs, bbox_start, G, gaia_dtype):
 def injected_table(x, y, G, ra, dec, cores, wing_scale):
     """
     Build the injected-star truth table.
+
+    Parameters
+    ----------
+    x, y: arrays
+        Patch-frame positions
+    G: array
+        Gaia G magnitudes
+    ra, dec: arrays
+        Degrees
+    cores: array
+        The canonical core flux per star (render_injected)
+    wing_scale: float
+        The wing amplitude relative to the canonical
+
+    Returns
+    -------
+    table: structured array
+        x, y, G, ra, dec, core_flux, wing_scale
     """
     t = np.zeros(x.size, dtype=[
         ('x', 'f8'), ('y', 'f8'), ('G', 'f4'), ('ra', 'f8'), ('dec', 'f8'),
@@ -234,10 +323,21 @@ def injected_table(x, y, G, ra, dec, cores, wing_scale):
 
 def flag_injected(table, inj, tol=0.5):
     """
-    Add an injected flag column to a table.
+    Add an 'injected' column to a profile or census table.
 
-    Add an 'injected' column (1 where the row's x, y match an
-    injected star) to a profile or census table
+    Parameters
+    ----------
+    table: structured array
+        With x and y columns
+    inj: structured array or None
+        The injected-star truth table
+    tol: float, optional
+        A row within this many px of an injected star is flagged
+
+    Returns
+    -------
+    table: structured array
+        With the i2 column injected, 1 where flagged
     """
     from numpy.lib import recfunctions as rfn
 
@@ -255,9 +355,27 @@ def measure_core_zero_point(image, good, stars, sky_sigma, glo=15.5,
     """
     Measure the real stars' core flux per unit Gaia flux.
 
-    The real stars' core flux per unit Gaia flux (sum within
-    CORE_R above the local median), for comparison with the
-    canonical core: prints and returns the median
+    The sum within CORE_R above the local median, for the census
+    stars of G in [glo, ghi), for comparison with the canonical core;
+    the median is printed.
+
+    Parameters
+    ----------
+    image: array
+        The image
+    good: bool array
+        The usable pixels
+    stars: structured array
+        The census
+    sky_sigma: float
+        The sky noise, for the printout
+    glo, ghi: float, optional
+        The G range of the stars used
+
+    Returns
+    -------
+    zp: float
+        The median core flux per unit Gaia flux
     """
     ny, nx = image.shape
     m = 20

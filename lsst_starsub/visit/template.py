@@ -71,6 +71,14 @@ CLOUD_GBINS = [(6.0, 10.0), (10.0, 12.0), (12.0, 13.5), (13.5, 15.5)]
 
 
 def wing_edges():
+    """
+    Get the log-spaced annulus edges of the wing cloud.
+
+    Returns
+    -------
+    edges: array
+        Integer radii from R_MIN to FAR_RMAX
+    """
     return np.unique(np.round(np.logspace(
         np.log10(R_MIN), np.log10(FAR_RMAX), NBIN_WING + 1,
     )))
@@ -78,17 +86,35 @@ def wing_edges():
 
 def star_stamps(image, good, seg, x, y, sel, halo):
     """
-    the individual core-normalized, sub-pixel-aligned template
-    stamps (as lsst_starsub.stamps.stack_star_stamps builds before
-    its median), skipping stars inside the halo zone
+    Cut the individual core-normalized, sub-pixel-aligned template stamps.
+
+    As lsst_starsub.stamps.stack_star_stamps builds them before its
+    median, skipping stars inside the halo zone.
+
+    Parameters
+    ----------
+    image: array
+        The sky-flattened image, ambient level removed
+    good: bool array
+    seg: array
+        The segmentation
+    x, y: arrays
+        The Gaia pixel positions
+    sel: int array
+        The template-star indices (stamps.select_template_stars)
+    halo: bool array
+        The bright-star halo zone
 
     Returns
     -------
-    stamps (n, 2 TMPL_HALF + 1, 2 TMPL_HALF + 1) with NaN where
-    unusable, the indices into sel that were used, and the core
-    amplitudes the stamps were normalized by (image units; with
-    the stars' Gaia fluxes these give the zero point k_in of
-    template units directly)
+    stamps: (n, 2 TMPL_HALF + 1, 2 TMPL_HALF + 1) array
+        NaN where unusable
+    used: int array
+        The indices of sel that were used
+    amps: array
+        The core amplitudes the stamps were normalized by (image
+        units; with the stars' Gaia fluxes these give the zero
+        point k_in of template units directly)
     """
     from scipy import ndimage
 
@@ -125,7 +151,7 @@ def star_stamps(image, good, seg, x, y, sel, halo):
 
 def extract_detector(vexp, gaia, gsub=GSUB):
     """
-    the per-detector inputs of the pooled template
+    Extract the per-detector inputs of the pooled template.
 
     Parameters
     ----------
@@ -133,13 +159,16 @@ def extract_detector(vexp, gaia, gsub=GSUB):
         As loaded (delivered state); modified in place
     gaia: array with fields
         The gaia extract for the detector
+    gsub: float, optional
+        The census depth
 
     Returns
     -------
-    dict with visit, detector, band, fwhm, sky_sigma, calib,
-    ambient, stamps (n, 101, 101), stamp_G, wing (structured
-    array per star: G, x, y, prof in nJy per unit flux, npix),
-    edges
+    extract: dict
+        visit, detector, band, fwhm, sky_sigma, calib,
+        ambient_flat, ambient_warp, stamps (n, 101, 101),
+        stamp_G, stamp_amp, wing (structured array per star: G,
+        x, y, prof in nJy per unit flux, npix), edges
     """
     from ..gaia import gaia_pixel_positions
 
@@ -220,9 +249,27 @@ def extract_detector(vexp, gaia, gsub=GSUB):
 
 def cloud_median(wing, edges, glo=None, ghi=None, min_stars=3):
     """
-    the median flux-normalized profile over the stars in [glo,
-    ghi), NaN where fewer than min_stars contribute; its error
-    (1.253 x the MAD-scaled scatter over sqrt(n)); and the counts
+    Take the median flux-normalized profile over a G slice of the cloud.
+
+    Parameters
+    ----------
+    wing: structured array
+        The per-star wing profiles (extract_detector)
+    edges: array
+        The annulus edges
+    glo, ghi: float, optional
+        The G range [glo, ghi); unbounded when None
+    min_stars: int, optional
+        Annuli with fewer contributing stars are NaN
+
+    Returns
+    -------
+    med: array
+        The median per annulus
+    err: array
+        Its error, 1.253 x the MAD-scaled scatter over sqrt(n)
+    count: int array
+        The stars contributing per annulus
     """
     sel = np.ones(wing.size, dtype=bool)
     if glo is not None:
@@ -246,11 +293,27 @@ def cloud_median(wing, edges, glo=None, ghi=None, min_stars=3):
 
 def cloud_table(wing, edges, gbins=CLOUD_GBINS):
     """
-    the per-G-bin cloud: one row per (G bin, radius) with the
-    median, its error and the count; glo = -1 marks the all-star
-    rows (diagnostic only, the fit uses the G bins: the faint
-    stars outnumber the bright ones and their flux-normalized
-    noise dominates the all-star median beyond ~300 px)
+    Build the per-G-bin cloud table.
+
+    One row per (G bin, radius) with the median, its error and the
+    count; glo = -1 marks the all-star rows (diagnostic only, the
+    fit uses the G bins: the faint stars outnumber the bright ones
+    and their flux-normalized noise dominates the all-star median
+    beyond ~300 px).
+
+    Parameters
+    ----------
+    wing: structured array
+        The per-star wing profiles
+    edges: array
+        The annulus edges
+    gbins: list of (glo, ghi), optional
+
+    Returns
+    -------
+    cloud: structured array
+        glo, ghi, rmid, med, err, count, model (NaN until
+        pool_visit fills it)
     """
     rmid = 0.5 * (edges[1:] + edges[:-1])
     rows = []
@@ -269,9 +332,22 @@ def cloud_table(wing, edges, gbins=CLOUD_GBINS):
 
 def stack_profile_errors(stamps, prof_size):
     """
-    the error of the stack's azimuthal profile at each integer
-    radius: the scatter of the per-stamp azimuthal means over
-    sqrt(n), MAD-scaled and median-corrected
+    Estimate the error of the stack's azimuthal profile.
+
+    At each integer radius, the scatter of the per-stamp azimuthal
+    means over sqrt(n), MAD-scaled and median-corrected.
+
+    Parameters
+    ----------
+    stamps: (n, size, size) array
+        The stamps that went into the stack
+    prof_size: int
+        The number of radii
+
+    Returns
+    -------
+    err: array
+        NaN where fewer than 3 stamps contribute
     """
     half = TMPL_HALF
     gy, gx = np.mgrid[-half:half + 1, -half:half + 1]
@@ -307,9 +383,11 @@ KIN_SCAN = np.exp(np.linspace(np.log(0.5), np.log(2.0), 29))
 def fit_wing_model(prof, prof_err, cloud, rmin=AUR_RMIN, rmax=FAR_RMAX,
                    min_count=AUR_MIN_COUNT):
     """
-    the two-power-law wing fit jointly to the stack profile
-    (template units, STACK_RFIT radii, with a sky pedestal) and
-    the per-G-bin cloud (nJy per unit gaia flux, rmin to rmax):
+    Fit the two-power-law wing jointly to the stack profile and the cloud.
+
+    The stack profile (template units, STACK_RFIT radii, with a sky
+    pedestal) and the per-G-bin cloud (nJy per unit gaia flux, rmin
+    to rmax):
 
         stack(r) = a r^s1 + b r^s2 + c
         cloud(r) = k_in (a r^s1 + b r^s2)
@@ -318,12 +396,27 @@ def fit_wing_model(prof, prof_err, cloud, rmin=AUR_RMIN, rmax=FAR_RMAX,
     scanned about its continuity estimate (cloud over stack where
     they overlap).  The single-law stack fit alone cannot give
     the inner law: the cloud is already flatter than the stack's
-    22-50 px slope by 50 px, so the two components overlap there
+    22-50 px slope by 50 px, so the two components overlap there.
+
+    Parameters
+    ----------
+    prof: array
+        The stack's azimuthal profile at integer radii
+    prof_err: array
+        Its error (stack_profile_errors)
+    cloud: structured array
+        From cloud_table
+    rmin, rmax: float, optional
+        The cloud radius range used
+    min_count: int, optional
+        Cloud rows with fewer stars are left out
 
     Returns
     -------
-    dict with slope (s1), ln_a, aur_slope (s2), aur_amp (b),
-    pedestal (c), k_in, chi2, npt, chi2_stack, chi2_cloud
+    fit: dict
+        slope (s1), ln_a, aur_slope (s2), aur_amp (b), pedestal
+        (c), k_in, k_in0 (the continuity estimate), chi2, npt,
+        chi2_stack, chi2_cloud
     """
     r0, r1 = STACK_RFIT
     rs = np.arange(r0, min(r1, prof.size - 1) + 1).astype('f8')
@@ -390,14 +483,29 @@ def fit_wing_model(prof, prof_err, cloud, rmin=AUR_RMIN, rmax=FAR_RMAX,
 
 
 def wing_law(r, slope, ln_a, aur_slope, aur_amp):
-    """the analytic halo in template units at radius r"""
+    """
+    Evaluate the analytic halo in template units.
+
+    Parameters
+    ----------
+    r: array
+        Radii in pixels, floored at 1
+    slope, ln_a: float
+        The inner power law
+    aur_slope, aur_amp: float
+        The aureole
+
+    Returns
+    -------
+    halo: array
+    """
     rc = np.maximum(np.asarray(r, dtype='f8'), 1.0)
     return np.exp(ln_a) * rc ** slope + aur_amp * rc ** aur_slope
 
 
 def pool_visit(extracts):
     """
-    the pooled template and wing model of one visit
+    Build the pooled template and wing model of one visit.
 
     Parameters
     ----------
@@ -406,11 +514,13 @@ def pool_visit(extracts):
 
     Returns
     -------
-    dict with template (extended array), stack (inner, denoised,
-    pedestal removed), prof (its azimuthal profile), params
-    dict, cloud (structured array per G bin and radius: glo,
-    ghi, rmid, med, count, model), wing (all stars, with a
-    detector column), detectors (structured array), edges
+    pooled: dict
+        template (extended array), stack (inner, denoised,
+        pedestal removed), prof (its azimuthal profile), prof_err,
+        params dict, cloud (structured array per G bin and radius:
+        glo, ghi, rmid, med, err, count, model), wing (all stars,
+        with a detector column), detectors (structured array),
+        edges
     """
     band = extracts[0]['band']
     canon = CANON.get(band)
@@ -507,8 +617,16 @@ def pool_visit(extracts):
 
 def write_template_file(fname, pooled):
     """
-    extensions: template, stack, params (one row), cloud, wing,
-    detectors, edges, prof
+    Write a pooled visit template file.
+
+    Extensions: template, stack, params (one row), cloud, wing,
+    detectors, edges, prof.
+
+    Parameters
+    ----------
+    fname: str
+    pooled: dict
+        From pool_visit
     """
     import rustfits
 
@@ -539,6 +657,18 @@ def write_template_file(fname, pooled):
 
 
 def read_template_file(fname):
+    """
+    Read a pooled visit template file.
+
+    Parameters
+    ----------
+    fname: str
+
+    Returns
+    -------
+    pooled: dict
+        As pool_visit returns it
+    """
     import rustfits
 
     out = {}
@@ -563,6 +693,16 @@ def read_template_file(fname):
 
 
 def plot_template(png, pooled):
+    """
+    Plot a pooled template: stack profile and fit, cloud, detectors.
+
+    Parameters
+    ----------
+    png: str
+        The output file
+    pooled: dict
+        From pool_visit
+    """
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
@@ -627,16 +767,28 @@ def plot_template(png, pooled):
     print('wrote', png)
 
 
-def canonical_wing(files, rmax=3000.0):
+def canonical_wing(files):
     """
-    the canonical physical wing of a band: the median over visit
-    template files of k_in T_v(r), the wing in nJy per unit Gaia
-    flux, on a common radial grid.  No per-visit information
-    remains; the test of whether one wing per band suffices
+    Build the canonical physical wing of a band.
+
+    The median over visit template files of k_in T_v(r), the wing
+    in nJy per unit Gaia flux, on a common radial grid.  No
+    per-visit information remains; the test of whether one wing per
+    band suffices.
+
+    Parameters
+    ----------
+    files: list of str
+        The visit template files
 
     Returns
     -------
-    r, T (nJy per unit flux), and the per-visit curves (nvisit, nr)
+    r: array
+        The radial grid of the first file
+    T: array
+        The median wing, nJy per unit flux
+    curves: (nvisit, nr) array
+        The per-visit curves
     """
     from .trough import radial_template
 

@@ -17,17 +17,36 @@ DEFAULT_GMAX = 21.0
 
 
 def visit_gaia_path(gaia_dir, visit):
+    """
+    Get the path of a visit's Gaia file.
+
+    Parameters
+    ----------
+    gaia_dir: str
+    visit: int
+
+    Returns
+    -------
+    path: str
+    """
     return os.path.join(gaia_dir, VISIT_GAIA_PATTERN.format(visit=int(visit)))
 
 
 def visit_circle(butler, visit):
     """
-    the bounding circle of the detectors with a wcs in the
-    visit summary, grown by VISIT_MARGIN_DEG
+    Get the bounding circle of a visit's detectors.
+
+    Over the detectors with a wcs in the visit summary, grown by
+    VISIT_MARGIN_DEG.
+
+    Parameters
+    ----------
+    butler: lsst.daf.butler.Butler
+    visit: int
 
     Returns
     -------
-    lsst.sphgeom.Circle
+    circle: lsst.sphgeom.Circle
     """
     import lsst.sphgeom as sphgeom
     from ..site import INSTRUMENT
@@ -59,8 +78,22 @@ def visit_circle(butler, visit):
 
 def make_visit_gaia_file(butler, visit, outfile, gmax=DEFAULT_GMAX):
     """
-    write the Gaia stars in the visit's bounding circle brighter
-    than gmax to outfile, in the lsst-starsub-make-gaia layout
+    Write a visit's Gaia file.
+
+    The stars in the visit's bounding circle brighter than gmax, in
+    the lsst-starsub-make-gaia layout.
+
+    Parameters
+    ----------
+    butler: lsst.daf.butler.Butler
+    visit: int
+    outfile: str
+    gmax: float, optional
+        Default DEFAULT_GMAX
+
+    Returns
+    -------
+    outfile: str
     """
     import rustfits
     from ..cli.make_gaia import REFCAT, convert_shard, get_shard_ids, in_circle
@@ -93,7 +126,21 @@ def make_visit_gaia_file(butler, visit, outfile, gmax=DEFAULT_GMAX):
 
 
 def ensure_visit_gaia_file(butler, visit, gaia_dir, gmax=DEFAULT_GMAX):
-    """the per-visit file's path, made if missing"""
+    """
+    Get the path of a visit's Gaia file, making it if missing.
+
+    Parameters
+    ----------
+    butler: lsst.daf.butler.Butler
+    visit: int
+    gaia_dir: str
+    gmax: float, optional
+        Default DEFAULT_GMAX
+
+    Returns
+    -------
+    path: str
+    """
     path = visit_gaia_path(gaia_dir, visit)
     if not os.path.exists(path):
         make_visit_gaia_file(butler, visit, path, gmax=gmax)

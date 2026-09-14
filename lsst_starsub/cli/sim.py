@@ -21,6 +21,10 @@ import numpy as np
 def get_args():
     """
     Parse the command line.
+
+    Returns
+    -------
+    args: argparse.Namespace
     """
     import argparse
     from ..visit.sim import DEFAULTS
@@ -64,7 +68,17 @@ def sim_geometry(butler, tract, patch, margin=150):
     """
     Get the tract wcs and the cell-coadd-sized patch box.
 
-    The tract wcs and the cell-coadd-sized patch box
+    Parameters
+    ----------
+    butler: lsst.daf.butler.Butler
+    tract, patch: int
+    margin: int, optional
+        Pixels beyond the patch inner box on each side
+
+    Returns
+    -------
+    wcs: ButlerWcs
+    box: SimpleBox
     """
     from ..geom import ButlerWcs, SimpleBox
     from ..site import SKYMAP
@@ -80,6 +94,18 @@ def sim_geometry(butler, tract, patch, margin=150):
 def write_sim_file(fname, sim, truth_table, cfg, meta):
     """
     Write the simulation file.
+
+    Parameters
+    ----------
+    fname: str
+    sim: dict
+        From lsst_starsub.visit.sim.simulate_coadd
+    truth_table: structured array
+        The stars: x, y, G, ra, dec, core_flux, wing_scale
+    cfg: dict
+        The simulation settings
+    meta: dict
+        The run identity; written with cfg as a one-row table
     """
     import rustfits
     from ..coadd.io import _meta_table
@@ -98,6 +124,16 @@ def write_sim_file(fname, sim, truth_table, cfg, meta):
 def read_sim_file(fname):
     """
     Read a simulation file.
+
+    Parameters
+    ----------
+    fname: str
+
+    Returns
+    -------
+    sim: dict
+        The coadds and the visit table, as simulate_coadd returns
+    truth_table: structured array
     """
     import rustfits
 
