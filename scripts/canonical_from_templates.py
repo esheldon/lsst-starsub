@@ -10,6 +10,7 @@ scatter of the survivors.
 
 usage: python canonical_from_templates.py TEMPLATEDIR BAND OUT.fits
 """
+
 import glob
 import os
 import sys
@@ -35,7 +36,9 @@ for f, p in zip(files, params):
     if slope <= SLOPE_BOUND:
         why.append(f'slope {slope:.2f} at the bound')
     if c2 > CHI2_FACTOR * chi2_med:
-        why.append(f'chi2 {c2:.0f} > {CHI2_FACTOR:.0f} x median {chi2_med:.0f}')
+        why.append(
+            f'chi2 {c2:.0f} > {CHI2_FACTOR:.0f} x median {chi2_med:.0f}'
+        )
     if why:
         print(f'  excluded {os.path.basename(f)}: ' + ', '.join(why))
     else:
