@@ -56,7 +56,7 @@ stars) with `lsst-starsub-cell-restore` and `lsst-starsub-make-slurm-cells`:
   `object` state reproduces the dual-state plot A.
 - Tract 2562, the typical-depth check (i; the 31 patches with good
   cells, cells with >= 3 inputs via `--good-cells` and `--min-inputs`;
-  2460 profile rows, 70 stars at G < 13): same behaviour at low
+  2460 profile rows, 70 stars at G < 13): same behavior at low
   statistics.  The bright-star `None` trough at 305 px, -26 +- 6,
   becomes -6 +- 7 restored; errors inflated ~40 percent, not the
   factor 3 seen before the order-2 removal.  Per cell the offsets are
@@ -532,7 +532,7 @@ template job per detector of the 28 visits, `extracts-{visit}/`).
      residual +27, +4, +1; sky error -34, -33, -25, -17, -10; model
      error -62, -38, -30, -21, -11.  As fractions of the wing this
      is the data's signature (sky 13-50 percent, model 24-58
-     percent, cancelling beyond 100 px, the collar inside the
+     percent, canceling beyond 100 px, the collar inside the
      exclusion).  With a perfect wing shape, no galaxies and a
      smooth sky the collar is there: it is the sequential
      sky-then-amplitude scheme, not the data.
@@ -709,13 +709,13 @@ template job per detector of the 28 visits, `extracts-{visit}/`).
      650 px.  `broadcal/wing-broadcal-i-pass1.fits`.
    - the amplitude census of pass 1 (29,914 free stars): 3 percent
      negative at every magnitude, star-to-star scatter 25-36
-     percent (the colour term of i-band flux against Gaia G: real,
+     percent (the color term of i-band flux against Gaia G: real,
      expected).  Of the 73 negative bright stars 26 are pairs
      closer than 30 px (the partner at +100), 18 are within 300 px
      of the edge, 3 are G < 6 stars whose wing covers the patch
      (degenerate with the mesh), most of the rest wider pairs with
      merged masks.  Fixed by a Gaussian prior on each amplitude
-     about the prediction with width 0.3 (the colour scatter;
+     about the prediction with width 0.3 (the color scatter;
      `joint.PRIOR_SIGMA`, `--joint-prior`), in the normal matrix's
      units sky_sigma^2 / 0.3^2 (a first version in inverse units
      did nothing): the pairs go to ~1, no negatives, isolated stars
@@ -818,7 +818,7 @@ template job per detector of the 28 visits, `extracts-{visit}/`).
    - the injected stars' model error, +6 to +8 (a ~2 percent high
      amplitude), is the same with both segmentations; still to be
      understood (a bias of the ring-free amplitude toward the
-     neighbours' light, or the pinned faint stars' prediction
+     neighbors' light, or the pinned faint stars' prediction
      being high by the k_stamp / k_in ratio and the free
      amplitudes compensating).
 

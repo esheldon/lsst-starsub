@@ -43,7 +43,7 @@ def main():
     summary = butler.get('visit_summary',
                          dataId=dict(instrument=INSTRUMENT, visit=visit))
     recs = [r for r in summary if r.getWcs() is not None]
-    # the boresight: the mean of the detector centres
+    # the boresight: the mean of the detector centers
     cens = np.array([[r.getWcs().pixelToSky(r.getBBox().getCenterX(),
                                             r.getBBox().getCenterY()).getRa().asDegrees(),
                       r.getWcs().pixelToSky(r.getBBox().getCenterX(),

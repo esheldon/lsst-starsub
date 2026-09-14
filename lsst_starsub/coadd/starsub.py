@@ -41,11 +41,11 @@ WING_RIN = 8.0    # px
 WING_ROUT = 16.0  # px
 # px: with this set, each of those stars' wing amplitude comes from its
 # core in the band (core_amplitudes), not the Gaia prediction, which
-# scatters by ~30 percent with the star's colour: the faint stars are
+# scatters by ~30 percent with the star's color: the faint stars are
 # redder than the calibration's, median core amplitudes r 0.87, i 1.2, z
 # 1.6 (2026-09-13).  None: the prediction
 WING_CORE_RAP = 5.0
-# the core amplitudes outside this range (a neighbour in the aperture, a
+# the core amplitudes outside this range (a neighbor in the aperture, a
 # star moved off its Gaia position) fall back to the prediction
 WING_AMP_RANGE = (0.25, 4.0)
 

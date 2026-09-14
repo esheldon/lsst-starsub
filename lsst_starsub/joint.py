@@ -1,5 +1,5 @@
 """
-The joint fit of the star amplitudes and the sky (TODO step 7c).
+The joint fit of the star amplitudes and the sky.
 
     image = sum_k A_k F_k P(r - r_k) + S(x) + noise
 
@@ -64,12 +64,12 @@ SEG_BIG_K = 4.0
 # masked nodes ran away (2026-09-11)
 SEG_BIG_RMAX = 650.0
 # the sky mesh can be tied together: a penalty (v_i - v_j)^2 /
-# (MESH_SMOOTH_DELTA sky_sigma)^2 on each pair of neighbouring node
+# (MESH_SMOOTH_DELTA sky_sigma)^2 on each pair of neighboring node
 # values, so a node with little data of its own (under a large source
 # or star mask, where the cells left sit at the edge of its hat) follows
-# its neighbours instead of extrapolating from those cells.  A constant
+# its neighbors instead of extrapolating from those cells.  A constant
 # sky costs nothing, so the level is not pulled (the ridge pulls to
-# zero).  Neighbouring well-supported nodes differ by 0.08-0.11 sky
+# zero).  Neighboring well-supported nodes differ by 0.08-0.11 sky
 # sigma (8 patches, 2026-09-11).  0.1 fixes the ridge's outlier nodes
 # under large star masks (04777-00069: -4.5 sigma, 10x its error) and
 # leaves the star residuals as they were; stiffer (0.03) loses real
@@ -86,7 +86,7 @@ MESH_SMOOTH_DELTA = 0.1
 # medians are 1.2-1.4, galaxies >= 2.0 sky sigma (the large r-band
 # segments of 37 patches, 2026-09-12).  Of the treatments in the cirrus
 # injection test (run-dp2-test-cirrus-inject, 2026-09-12) this gave the
-# best colours on and near the cirrus, no excess detections near it and
+# best colors on and near the cirrus, no excess detections near it and
 # the shortest run times; masked and grown, its faint surroundings stay
 # in the image.  Faint objects on the cirrus are still biased (-0.11 in
 # r-i at S/N 10-20), so joint_fit returns the region for masking.
@@ -94,7 +94,7 @@ MESH_SMOOTH_DELTA = 0.1
 SEG_DIFFUSE_MEDIAN = 1.6
 SEG_DIFFUSE_BW = 32   # px
 RENDER_BLOCK = 256  # rows per block when rendering the mesh
-# the amplitude prior about the prediction (A = 1): the colour
+# the amplitude prior about the prediction (A = 1): the color
 # scatter of the i-band to Gaia G flux ratio; isolated stars are
 # constrained 10x better by their pixels, close pairs, edge stars
 # and the whole-patch wings of the brightest stars are not (3
@@ -419,7 +419,7 @@ def mesh_columns(cy, cx, shape, spacing):
 
 def mesh_difference_matrix(nodes):
     """
-    Build the first differences of neighbouring mesh nodes.
+    Build the first differences of neighboring mesh nodes.
 
     One row per horizontally or vertically adjacent node pair: +1 at
     one node, -1 at the other.

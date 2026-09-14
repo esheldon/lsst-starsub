@@ -1,5 +1,5 @@
 """
-the joint fit's sky mesh: the neighbour-difference operator and the
+the joint fit's sky mesh: the neighbor-difference operator and the
 smoothness prior filling a node that has no data
 """
 import numpy as np
@@ -46,7 +46,7 @@ def _plane_fit(delta, monkeypatch):
 
 def test_smooth_fills_empty_node(monkeypatch):
     value, err = _plane_fit(0.1, monkeypatch)
-    # the neighbours' mean, which for a plane is the plane
+    # the neighbors' mean, which for a plane is the plane
     assert abs(value - 0.35) < 0.05
     ridge_value, ridge_err = _plane_fit(None, monkeypatch)
     # the ridge alone leaves the node unconstrained

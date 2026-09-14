@@ -4,7 +4,7 @@
 // measured.  This is the visit-level half of the pipeline that was
 // built first; the trough correction on the coadds (response coadd,
 // forward input state, statistical restoration) was removed once the
-// joint fit (flow-joint.dot) made it unnecessary (TODO.md 7d).  What
+// joint fit (flow-joint.dot) made it unnecessary.  What
 // remains is the account of the trough and the DM background pass the
 // ideal simulation runs
 // render: dot -Tpdf docs/flow-forward-model.dot -o flow-forward-model.pdf

@@ -1,6 +1,5 @@
 """
-synthetic stars with a known wing for the injection test (TODO
-step 7)
+Synthetic stars with a known wing for the injection test.
 
 Each injected star is
 

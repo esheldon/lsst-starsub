@@ -3,7 +3,7 @@ The bright-star census and the masks built from it.
 
 select_stars picks the Gaia stars on and near a patch; circle_radius and
 build_star_mask give each a magnitude-scaled mask circle;
-field_segmentation keeps neighbours out of the star fits;
+field_segmentation keeps neighbors out of the star fits;
 apply_star_taper fades the image to zero at the mask edges; and
 make_star_table and make_starmask_plane are the outputs.  diffuse_mask
 turns the joint fit's diffuse regions into a mask.  Shared by the two
