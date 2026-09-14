@@ -41,7 +41,7 @@ def get_args():
     Parse the command line.
     """
     import argparse
-    from ..visit import VISIT_COLLECTION, VISIT_REPO
+    from ..site import VISIT_COLLECTION, VISIT_REPO
     from ..census import GSUB
 
     parser = argparse.ArgumentParser()
@@ -95,9 +95,14 @@ def main():
     """
     from ..gaia import GMAX, gaia_pixel_positions, read_gaia_file
     from ..geom import ButlerWcs, SimpleBox
-    from ..clean import clean_stem, clean_tag, run_clean, write_clean_file
-    from ..coadd import coadd_data_id, load_cell_coadd
-    from ..visit import VisitExposure, convert_mask, make_visit_butler
+    from ..coadd.clean import (
+        clean_stem,
+        clean_tag,
+        run_clean,
+        write_clean_file,
+    )
+    from ..coadd.cellcoadd import coadd_data_id, load_cell_coadd
+    from ..visit.exposure import VisitExposure, convert_mask, make_visit_butler
     from ..wing import read_wing_model
 
     sys.stdout.reconfigure(line_buffering=True)
@@ -145,8 +150,12 @@ def main():
         from scipy import ndimage
         from ..census import build_star_mask, select_stars
         from ..inject import (
-            DEFAULT_PLAN, census_rows, draw_positions, injected_table,
-            parse_plan, render_injected,
+            DEFAULT_PLAN,
+            census_rows,
+            draw_positions,
+            injected_table,
+            parse_plan,
+            render_injected,
         )
         # the existing star masks, to keep the injected centers clear
         x0, y0 = gaia_pixel_positions(gaia, wcs, tbox)

@@ -312,7 +312,10 @@ def test_restore_no_model_is_noop():
 def test_template_out_half():
     from lsst_starsub.census import circle_radius
     from lsst_starsub.stamps import (
-        TMPL_EXT_FACTOR, TMPL_OUT_HALF, TMPL_OUT_MAX, template_out_half,
+        TMPL_EXT_FACTOR,
+        TMPL_OUT_HALF,
+        TMPL_OUT_MAX,
+        template_out_half,
     )
     # faint stars keep the floor
     assert template_out_half(17.0) == TMPL_OUT_HALF

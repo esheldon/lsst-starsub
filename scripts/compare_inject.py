@@ -55,8 +55,8 @@ def clipped_mean(a, nsig=3.0, niter=3):
     return out_m, out_e
 
 
-from lsst_starsub.census import circle_radius  # noqa
-from lsst_starsub.template import read_canonical_wing  # noqa
+from lsst_starsub.census import circle_radius
+from lsst_starsub.wing import read_canonical_wing
 
 canonical = os.environ.get(
     'CANONICAL',

@@ -1,6 +1,6 @@
 """
 cli/sim: the ideal-conditions simulation of one patch (see
-lsst_starsub.sim), followed by the cleaning of the chosen coadd
+lsst_starsub.visit.sim), followed by the cleaning of the chosen coadd
 state with every star's truth known.
 
 Writes {outdir}/sim-{tract}-{patch}-{band}-s{seed}.fits (the
@@ -23,8 +23,8 @@ def get_args():
     Parse the command line.
     """
     import argparse
-    from ..sim import DEFAULTS
-    from ..visit import VISIT_COLLECTION, VISIT_REPO
+    from ..visit.sim import DEFAULTS
+    from ..site import VISIT_COLLECTION, VISIT_REPO
     from ..census import GSUB
 
     parser = argparse.ArgumentParser()
@@ -68,7 +68,7 @@ def sim_geometry(butler, tract, patch, margin=150):
     The tract wcs and the cell-coadd-sized patch box
     """
     from ..geom import ButlerWcs, SimpleBox
-    from ..visit import SKYMAP
+    from ..site import SKYMAP
 
     skymap = butler.get('skyMap', skymap=SKYMAP)
     tr = skymap[tract]
@@ -83,7 +83,7 @@ def write_sim_file(fname, sim, truth_table, cfg, meta):
     Write the simulation file.
     """
     import rustfits
-    from ..io import _meta_table
+    from ..coadd.io import _meta_table
 
     with rustfits.FITS(fname, 'w+') as fits:
         for name in ('none', 'response', 'stars', 'sky', 'raw', 'var'):
@@ -118,11 +118,16 @@ def main():
     """
     from ..gaia import GMAX, gaia_pixel_positions, read_gaia_file
     from ..maskbits import DM_SAT
-    from ..clean import clean_stem, clean_tag, run_clean, write_clean_file
-    from ..profiles import ambient_levels, measure_profiles
-    from ..sim import DEFAULTS, simulate_coadd
+    from ..coadd.clean import (
+        clean_stem,
+        clean_tag,
+        run_clean,
+        write_clean_file,
+    )
+    from ..visit.profiles import ambient_levels, measure_profiles
+    from ..visit.sim import DEFAULTS, simulate_coadd
     from ..wing import read_wing_model
-    from ..visit import VisitExposure, make_visit_butler
+    from ..visit.exposure import VisitExposure, make_visit_butler
 
     sys.stdout.reconfigure(line_buffering=True)
     args = get_args()

@@ -5,7 +5,7 @@ the smooth-surface fit the forward-model check uses
 """
 import numpy as np
 
-from .visit import SKYMAP
+from ..site import SKYMAP
 
 
 def coadd_data_id(tract, patch, band):

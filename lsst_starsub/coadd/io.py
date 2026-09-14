@@ -130,7 +130,7 @@ def plot_summary(png, vexp, res, states, edges, ptable):
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as mplt
-    from .profiles import stack_profiles
+    from ..visit.profiles import stack_profiles
 
     rmid = 0.5 * (edges[:-1] + edges[1:])
     stars = res['stars']

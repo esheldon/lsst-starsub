@@ -28,7 +28,7 @@ This module reproduces the mask and the fit, and measures the
 response
 """
 
-from .visit import INSTRUMENT
+from ..site import INSTRUMENT
 
 # from CalibrateImageTask._remeasure_star_background
 STAR_BG_GROW_SIGMA = 70.0

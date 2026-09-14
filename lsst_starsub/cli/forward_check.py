@@ -18,7 +18,7 @@ import numpy as np
 
 def get_args():
     import argparse
-    from ..visit import VISIT_COLLECTION, VISIT_REPO
+    from ..site import VISIT_COLLECTION, VISIT_REPO
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--visit', type=int, required=True)
@@ -52,9 +52,10 @@ def main():
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-    from ..coadd import SMOOTH_ORDER, fit_smooth_surface
-    from ..visit import INSTRUMENT, make_visit_butler
-    from .. import forward
+    from ..coadd.cellcoadd import SMOOTH_ORDER, fit_smooth_surface
+    from ..site import INSTRUMENT
+    from ..visit.exposure import make_visit_butler
+    from ..visit import forward
 
     sys.stdout.reconfigure(line_buffering=True)
     args = get_args()

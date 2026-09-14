@@ -41,10 +41,10 @@ def run_clean(vexp, gaia, tbox, state_name, gsub, nround, grow_bright,
     dict with res, states, seg, ambient, edges, ptable, dedges,
     dtable, star_table, sky_sigma
     """
-    from .census import field_segmentation
-    from .geom import SimpleBox
-    from .profiles import ambient_levels, measure_profiles
-    from .visit import build_wide_star_mask, handle_stars_visit
+    from ..census import field_segmentation
+    from ..geom import SimpleBox
+    from ..visit.profiles import ambient_levels, measure_profiles
+    from ..visit.exposure import build_wide_star_mask, handle_stars_visit
 
     res = handle_stars_visit(
         vexp, gaia, gsub=gsub, restore='none', nround=nround,
@@ -64,7 +64,7 @@ def run_clean(vexp, gaia, tbox, state_name, gsub, nround, grow_bright,
         # residual is their difference
         states['perfect'] = flat - truth
         states['model_error'] = res['star_model'] - truth
-        from .inject import measure_core_zero_point
+        from ..inject import measure_core_zero_point
         measure_core_zero_point(flat, vexp.good, res['stars'],
                                 vexp.sky_sigma)
     seg = field_segmentation(residual, vexp.good, vexp.sky_sigma)
@@ -81,7 +81,7 @@ def run_clean(vexp, gaia, tbox, state_name, gsub, nround, grow_bright,
     )
     star_table = res['star_table']
     if inj is not None:
-        from .inject import flag_injected
+        from ..inject import flag_injected
         star_table = flag_injected(star_table, inj)
         ptable = flag_injected(ptable, inj)
         dtable = flag_injected(dtable, inj)

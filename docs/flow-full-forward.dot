@@ -50,7 +50,7 @@ digraph starsub {
         raw [label="raw sky image =\npreliminary image + stored background"];
         maskr [label="rebuild the mask the fit saw:\nfirst-pass 50-sigma detections dilated 10 px,\nstar-background detection at the stored\nadaptive threshold grown 70 psf sigma"];
         render [label="render census wings (G < 16)\nfrom the canonical wing"];
-        resp [label="response = fit(raw) - fit(raw - stars)\n(star_background config: 128 px bins,\nMEANCLIP, weighted 6x6 Chebyshev);\norder-2 surface removed; stored coarse\n[lsst_starsub.trough.ResponseCache]"];
+        resp [label="response = fit(raw) - fit(raw - stars)\n(star_background config: 128 px bins,\nMEANCLIP, weighted 6x6 Chebyshev);\norder-2 surface removed; stored coarse\n[lsst_starsub.visit.trough.ResponseCache]"];
         raw -> maskr -> resp;
         render -> resp;
     }

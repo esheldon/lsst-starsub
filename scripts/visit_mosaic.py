@@ -29,8 +29,9 @@ def tangent(ra, dec, ra0, dec0):
 
 
 def main():
-    from lsst_starsub.visit import make_visit_butler, INSTRUMENT
-    from lsst_starsub.forward import load_raw_exposure
+    from lsst_starsub.visit.exposure import make_visit_butler
+    from lsst_starsub.site import INSTRUMENT
+    from lsst_starsub.visit.forward import load_raw_exposure
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt

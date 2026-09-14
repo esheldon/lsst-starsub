@@ -5,7 +5,7 @@ smoothness prior filling a node that has no data
 import numpy as np
 
 import lsst_starsub.joint as jmod
-from lsst_starsub.visit import render_canonical_stars
+from lsst_starsub.wing import render_canonical_stars
 
 
 def test_mesh_difference_matrix():

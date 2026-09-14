@@ -30,15 +30,27 @@ cloud with its model, and the per-detector and per-star records
 """
 import numpy as np
 
-from .census import build_star_mask, field_segmentation, select_stars
+from ..census import build_star_mask, field_segmentation, select_stars
 from .profiles import R_MIN, measure_profiles
-from .stamps import (
-    AUR_GMAX, AUR_SLOPE_SEP, CANON, HALO_SLOPE, TMPL_HALF, TMPL_OUT_MAX,
-    denoise_template, extend_template_halo, fit_halo_slope,
-    measure_coadd_fwhm, select_template_stars,
+from ..stamps import (
+    AUR_GMAX,
+    AUR_SLOPE_SEP,
+    CANON,
+    HALO_SLOPE,
+    TMPL_HALF,
+    TMPL_OUT_MAX,
+    denoise_template,
+    extend_template_halo,
+    fit_halo_slope,
+    measure_coadd_fwhm,
+    select_template_stars,
 )
-from .visit import (
-    GSUB, WIDE_BW, WIDE_GMAX, build_wide_star_mask, restore_background,
+from .exposure import (
+    GSUB,
+    WIDE_BW,
+    WIDE_GMAX,
+    build_wide_star_mask,
+    restore_background,
     sky_background,
 )
 
@@ -129,7 +141,7 @@ def extract_detector(vexp, gaia, gsub=GSUB):
     array per star: G, x, y, prof in nJy per unit flux, npix),
     edges
     """
-    from .gaia import gaia_pixel_positions
+    from ..gaia import gaia_pixel_positions
 
     mask0 = vexp.mask.array[:, :, 0]
     x, y = gaia_pixel_positions(gaia, vexp.wcs, vexp.bbox)
@@ -638,21 +650,3 @@ def canonical_wing(files, rmax=3000.0):
         curves.append(t['params']['k_in'] * np.interp(r0, r, T))
     curves = np.array(curves)
     return r0, np.median(curves, axis=0), curves
-
-
-def write_canonical_wing(fname, r, T, band, nvisit):
-    import rustfits
-
-    tab = np.zeros(r.size, dtype=[('r', 'f8'), ('T', 'f8')])
-    tab['r'], tab['T'] = r, T
-    with rustfits.FITS(fname, 'w+') as fits:
-        fits.write_table(tab, extname='wing',
-                         header={'band': band, 'nvisit': int(nvisit)})
-
-
-def read_canonical_wing(fname):
-    import rustfits
-
-    with rustfits.FITS(fname) as fits:
-        tab = fits['wing'].read()
-    return tab['r'].astype('f8'), tab['T'].astype('f8')

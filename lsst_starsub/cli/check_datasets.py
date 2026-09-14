@@ -8,7 +8,7 @@ the cell coadd the visit_summary and the stored visit background
 
 def get_args():
     import argparse
-    from ..visit import VISIT_COLLECTION, VISIT_REPO
+    from ..site import VISIT_COLLECTION, VISIT_REPO
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--tract', type=int, required=True)
@@ -20,8 +20,9 @@ def get_args():
 
 
 def main():
-    from ..coadd import coadd_data_id
-    from ..visit import INSTRUMENT, make_visit_butler
+    from ..coadd.cellcoadd import coadd_data_id
+    from ..site import INSTRUMENT
+    from ..visit.exposure import make_visit_butler
 
     args = get_args()
     butler = make_visit_butler(args.repo, args.collection)
@@ -40,7 +41,7 @@ def main():
             ok &= bool(have)
 
     try:
-        from ..coadd import load_cell_coadd
+        from ..coadd.cellcoadd import load_cell_coadd
         mcoadd = load_cell_coadd(butler, did)
     except Exception as err:
         print(f'  cannot read the cell coadd ({err!r}); stopping')

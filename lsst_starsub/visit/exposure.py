@@ -50,23 +50,27 @@ are plain numpy
 """
 import numpy as np
 
-from .census import (
-    GSUB, build_star_mask, circle_radius, field_segmentation,
-    make_star_table, select_stars,
+from ..census import (
+    GSUB,
+    build_star_mask,
+    circle_radius,
+    field_segmentation,
+    make_star_table,
+    select_stars,
 )
-from .geom import SimpleBox
-from .maskbits import DM_INTRP, DM_NO_DATA, DM_SAT
-from .stamps import (
-    PRE_BW, PRE_GROW, TMPL_OUT_MAX, measure_coadd_fwhm, subtract_stars,
+from ..geom import SimpleBox
+from ..maskbits import DM_INTRP, DM_NO_DATA, DM_SAT
+from ..site import INSTRUMENT, SKYMAP, VISIT_COLLECTION, VISIT_REPO
+from ..stamps import (
+    PRE_BW,
+    PRE_GROW,
+    TMPL_OUT_MAX,
+    measure_coadd_fwhm,
+    subtract_stars,
     template_out_half,
 )
+from ..wing import render_canonical_stars
 
-# the weekly reprocessing runs carry the shapelets IQ score in
-# visit_detector_table; DP2 itself does not
-VISIT_REPO = 'dp2_prep'
-VISIT_COLLECTION = 'LSSTCam/runs/DRP/w_2026_32/DM-55677'
-INSTRUMENT = 'LSSTCam'
-SKYMAP = 'lsst_cells_v2'
 
 # shapelets IQ score tiers (low is good), from the DRP team
 IQ_TIERS = [
@@ -360,25 +364,6 @@ def star_model_image(shape, slist):
     return model
 
 
-def render_canonical_stars(shape, stars, canonical, gsub=GSUB, amps=None,
-                           verbose=True):
-    """
-    the census stars' images (nJy) from the canonical wing, a pure
-    prediction: 10^(-0.4 G) T(r) with T in nJy per unit Gaia flux,
-    times the per-star amplitudes when given
-    """
-    from .trough import render_wing_image
-
-    image, n = render_wing_image(
-        shape, stars['x'], stars['y'], stars['G'], canonical, 1.0, 1.0,
-        gmax=gsub, eps=0.005, amps=amps,
-    )
-    if verbose:
-        print(f'    canonical star model: {n} stars rendered, '
-              f'max {image.max():.0f} nJy')
-    return image
-
-
 def handle_stars_visit(vexp, gaia, gsub=GSUB, restore='initial',
                        nround=NROUND, grow_bright=None,
                        star_model='template', canonical=None,
@@ -443,7 +428,7 @@ def handle_stars_visit(vexp, gaia, gsub=GSUB, restore='initial',
         delivered (the image as delivered, copy)
     """
     from scipy import ndimage
-    from .gaia import gaia_pixel_positions
+    from ..gaia import gaia_pixel_positions
 
     delivered = vexp.image.array.copy()
     mask0 = vexp.mask.array[:, :, 0]
@@ -456,7 +441,7 @@ def handle_stars_visit(vexp, gaia, gsub=GSUB, restore='initial',
     # bright-star masks plus grow_bright when asked for
     fine_excl = dstar < PRE_GROW
     if grow_bright is not None:
-        from .stamps import RESTORE_GMAX
+        from ..stamps import RESTORE_GMAX
         bright = stars[stars['G'] < RESTORE_GMAX]
         if bright.size > 0:
             bsm, _ = build_star_mask(bright, mask0, verbose=False)
@@ -479,7 +464,7 @@ def handle_stars_visit(vexp, gaia, gsub=GSUB, restore='initial',
     if star_model != 'template' and canonical is None:
         raise ValueError(f'star_model {star_model!r} needs the canonical wing')
     if star_model == 'joint':
-        from .joint import SPACING, joint_fit
+        from ..joint import SPACING, joint_fit
         jf = joint_fit(
             vexp.image.array, vexp.good & ~starmask, stars, canonical,
             vexp.sky_sigma,
@@ -666,7 +651,7 @@ def load_visit_exposure(butler, visit, detector, rng=None):
     rng: numpy Generator, optional
         For the noise realization
     """
-    from .geom import ButlerWcs
+    from ..geom import ButlerWcs
 
     did = dict(instrument=INSTRUMENT, visit=int(visit),
                detector=int(detector))
@@ -774,7 +759,7 @@ def load_gaia_for_exposure(vexp, gaia_file=None, gmax=None):
     the gaia extract covering the detector, from a file
     (lsst_starsub.gaia.read_gaia_file layout) or the TAP query
     """
-    from .gaia import GMAX, fetch_gaia, read_gaia_file
+    from ..gaia import GMAX, fetch_gaia, read_gaia_file
 
     if gmax is None:
         gmax = GMAX

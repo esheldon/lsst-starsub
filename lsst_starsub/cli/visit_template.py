@@ -1,6 +1,6 @@
 """
 cli/visit_template: the pooled per-visit star template and wing
-model (lsst_starsub.template) from all, or a subset, of the
+model (lsst_starsub.visit.template) from all, or a subset, of the
 visit's detectors
 
 Writes {outdir}/template-{visit}-{band}.fits and a png.  The
@@ -18,7 +18,7 @@ _WORKER = {}
 
 def get_args():
     import argparse
-    from ..visit import VISIT_COLLECTION, VISIT_REPO
+    from ..site import VISIT_COLLECTION, VISIT_REPO
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--visit', type=int, required=True)
@@ -55,7 +55,7 @@ def get_args():
 
 
 def visit_detectors(butler, visit):
-    from ..visit import INSTRUMENT
+    from ..site import INSTRUMENT
 
     cat = butler.get(
         'visit_summary', dataId=dict(instrument=INSTRUMENT, visit=visit),
@@ -67,8 +67,8 @@ def visit_detectors(butler, visit):
 
 
 def extract_one(butler, visit, detector, gaia_path):
-    from ..template import extract_detector
-    from ..visit import load_gaia_for_exposure, load_visit_exposure
+    from ..visit.template import extract_detector
+    from ..visit.exposure import load_gaia_for_exposure, load_visit_exposure
 
     t0 = time.time()
     vexp = load_visit_exposure(butler, visit, detector)
@@ -79,7 +79,7 @@ def extract_one(butler, visit, detector, gaia_path):
 
 
 def _worker(args):
-    from ..visit import make_visit_butler
+    from ..visit.exposure import make_visit_butler
 
     repo, collection, visit, detector, gaia_path = args
     if 'butler' not in _WORKER:
@@ -93,7 +93,7 @@ def _worker(args):
 
 def read_extract(fname):
     import rustfits
-    from ..template import wing_edges
+    from ..visit.template import wing_edges
 
     with rustfits.FITS(fname) as fits:
         hdr = fits['stamps'].header
@@ -127,8 +127,8 @@ def write_extract(fname, ext):
 
 
 def main():
-    from ..gaia import ensure_visit_gaia_file
-    from ..visit import make_visit_butler
+    from ..visit.gaia import ensure_visit_gaia_file
+    from ..visit.exposure import make_visit_butler
 
     sys.stdout.reconfigure(line_buffering=True)
     args = get_args()
@@ -185,7 +185,7 @@ def main():
 
 
 def pool_and_write(args, extracts):
-    from ..template import plot_template, pool_visit, write_template_file
+    from ..visit.template import plot_template, pool_visit, write_template_file
 
     pooled = pool_visit(extracts)
     band = pooled['params']['band']

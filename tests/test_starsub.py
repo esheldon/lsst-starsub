@@ -4,7 +4,7 @@ subtraction, cores left in place
 """
 import numpy as np
 
-import lsst_starsub.starsub as smod
+import lsst_starsub.coadd.starsub as smod
 from lsst_starsub.wing import WingModel
 
 
@@ -65,7 +65,7 @@ def test_faint_wings_subtracted(monkeypatch):
 
 def _star_image(amp):
     """a G 20 star at (100.3, 99.6) drawn at amp times its prediction"""
-    from lsst_starsub.visit import render_canonical_stars
+    from lsst_starsub.wing import render_canonical_stars
 
     star = np.zeros(1, dtype=[('x', 'f8'), ('y', 'f8'), ('G', 'f8')])
     star['x'], star['y'], star['G'] = 100.3, 99.6, 20.0

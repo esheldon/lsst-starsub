@@ -8,7 +8,7 @@ apply_star_taper fades the image to zero at the mask edges; and
 make_star_table and make_starmask_plane are the outputs.  diffuse_mask
 turns the joint fit's diffuse regions into a mask.  Shared by the two
 star routes, the stamp templates (lsst_starsub.stamps) and the joint fit
-(lsst_starsub.starsub).
+(lsst_starsub.coadd.starsub).
 
 The apodization is the consumer's job: the star routes return the
 mask circles and the distance transform off them (dstar); whoever

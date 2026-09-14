@@ -7,15 +7,22 @@ a template from stacked stamps of bright unsaturated stars (a fitted
 inner halo and aureole, or the canonical per-band shape in sparse
 fields), and subtracts every census star with amplitudes solved jointly
 from rings just outside the masks.  lsst_mdet runs it for
---starsub-method template; the wing calibration (lsst_starsub.template)
+--starsub-method template; the wing calibration (lsst_starsub.visit.template)
 reuses its template machinery.  Formerly lsst_mdet.starsub, moved
 unchanged.
 """
 import numpy as np
 
 from .census import (
-    APOD_STARS, GSAT, GSUB, build_star_mask, circle_radius,
-    field_segmentation, make_star_table, own_component_ids, select_stars,
+    APOD_STARS,
+    GSAT,
+    GSUB,
+    build_star_mask,
+    circle_radius,
+    field_segmentation,
+    make_star_table,
+    own_component_ids,
+    select_stars,
 )
 from .gaia import gaia_pixel_positions
 from .maskbits import DM_OUT

@@ -17,7 +17,7 @@ import numpy as np
 
 def get_args():
     import argparse
-    from ..visit import VISIT_COLLECTION, VISIT_REPO
+    from ..site import VISIT_COLLECTION, VISIT_REPO
     from ..census import GSUB
 
     parser = argparse.ArgumentParser()
@@ -74,12 +74,15 @@ def output_name(outdir, tract, patch, band, visit, detector, ext):
 
 def process_one(butler, visit, detector, args, iq_score=np.nan):
     from ..census import field_segmentation
-    from ..profiles import ambient_levels, measure_profiles
-    from ..visit import (
-        build_wide_star_mask, handle_stars_visit, iq_tier,
-        load_gaia_for_exposure, load_visit_exposure,
+    from ..visit.profiles import ambient_levels, measure_profiles
+    from ..visit.exposure import (
+        build_wide_star_mask,
+        handle_stars_visit,
+        iq_tier,
+        load_gaia_for_exposure,
+        load_visit_exposure,
     )
-    from ..io import write_visit_file, plot_summary
+    from ..coadd.io import write_visit_file, plot_summary
 
     print(
         f'visit {visit} detector {detector} '
@@ -133,7 +136,7 @@ def process_one(butler, visit, detector, args, iq_score=np.nan):
         fwhm=res['fwhm'] if res['fwhm'] is not None else -1.0,
     )
     if args.profiles_only:
-        from ..io import write_profiles_file
+        from ..coadd.io import write_profiles_file
         stem = os.path.basename(output_name(
             args.outdir, args.tract, args.patch, band, visit,
             detector, 'fits',
@@ -167,8 +170,10 @@ def process_one(butler, visit, detector, args, iq_score=np.nan):
 
 
 def main():
-    from ..visit import (
-        load_iq_scores, make_visit_butler, select_coadd_inputs,
+    from ..visit.exposure import (
+        load_iq_scores,
+        make_visit_butler,
+        select_coadd_inputs,
     )
 
     import sys

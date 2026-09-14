@@ -68,7 +68,7 @@ def wing_taper(r, rin=None, rout=None):
     -------
     taper: array
     """
-    from .census import taper_from_distance
+    from ..census import taper_from_distance
 
     rin = WING_RIN if rin is None else rin
     rout = WING_ROUT if rout is None else rout
@@ -157,8 +157,8 @@ def subtract_faint_wings(image, gaia, x, y, wing, gsub, good=None,
     nwing: int
         The number of stars whose wings were subtracted
     """
-    from .visit import render_canonical_stars
-    from .wing import WingModel
+    from ..wing import render_canonical_stars
+    from ..wing import WingModel
 
     if WING_GMAX is None or not WING_GMAX > gsub:
         return 0
@@ -210,7 +210,7 @@ def load_wing(fname):
     -------
     WingModel, with the file name in its fname attribute
     """
-    from .wing import read_wing_model
+    from ..wing import read_wing_model
 
     wing = read_wing_model(fname)
     wing.fname = fname
@@ -274,10 +274,10 @@ def handle_stars_joint(deep_coadd, wcs, gaia, wing, gsub=None,
         (wing_gmax, wing_rin, wing_rout, wing_core_rap)
     """
     from scipy import ndimage
-    from .census import GSUB, build_star_mask, make_star_table, select_stars
-    from .gaia import gaia_pixel_positions
-    from .joint import GFIT, PRIOR_SIGMA, SPACING, joint_fit
-    from .maskbits import DM_NO_DATA
+    from ..census import GSUB, build_star_mask, make_star_table, select_stars
+    from ..gaia import gaia_pixel_positions
+    from ..joint import GFIT, PRIOR_SIGMA, SPACING, joint_fit
+    from ..maskbits import DM_NO_DATA
 
     if gsub is None:
         gsub = GSUB
@@ -495,9 +495,9 @@ def render_fit(tables, band):
     -------
     sky, stars: (ny, nx) f4 images in nJy
     """
-    from .joint import render_mesh
-    from .visit import render_canonical_stars
-    from .wing import WingModel
+    from ..joint import render_mesh
+    from ..wing import render_canonical_stars
+    from ..wing import WingModel
 
     meta = tables[META_EXT]
     m = meta[meta['band'] == band]

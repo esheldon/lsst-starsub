@@ -22,7 +22,7 @@ clipped and flagged SAT.
 """
 import numpy as np
 
-from .inject import BLEND_R0, BLEND_R1, CORE_R
+from ..inject import BLEND_R0, BLEND_R1, CORE_R
 
 DEFAULTS = dict(
     nvisit=20,
@@ -226,9 +226,15 @@ def dm_background_pass(raw, var, satmask, fwhm_px, star_image=None):
     import lsst.geom as geom
     from lsst.meas.algorithms import SingleGaussianPsf
     from .forward import (
-        DETECTED_PLANES, PSF_DET_DILATE, PSF_DET_MULTIPLIER,
-        PSF_DET_THRESHOLD, STAR_BG_GROW_SIGMA, _clear_detected, _detect,
-        _dilate_detected, fit_star_background,
+        DETECTED_PLANES,
+        PSF_DET_DILATE,
+        PSF_DET_MULTIPLIER,
+        PSF_DET_THRESHOLD,
+        STAR_BG_GROW_SIGMA,
+        _clear_detected,
+        _detect,
+        _dilate_detected,
+        fit_star_background,
     )
 
     ny, nx = raw.shape

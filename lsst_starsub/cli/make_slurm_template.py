@@ -39,7 +39,7 @@ export NUMEXPR_NUM_THREADS=1
 
 def get_args():
     import argparse
-    from ..visit import VISIT_COLLECTION, VISIT_REPO
+    from ..site import VISIT_COLLECTION, VISIT_REPO
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--visits', type=int, nargs='+', required=True)
@@ -65,8 +65,8 @@ def get_args():
 
 
 def main():
-    from ..gaia import ensure_visit_gaia_file
-    from ..visit import make_visit_butler
+    from ..visit.gaia import ensure_visit_gaia_file
+    from ..visit.exposure import make_visit_butler
     from .visit_template import visit_detectors
 
     args = get_args()

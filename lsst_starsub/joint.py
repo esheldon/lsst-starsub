@@ -639,7 +639,7 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
         SEG_DIFFUSE_MEDIAN None or a single pass)
     """
     from scipy import sparse
-    from .visit import render_canonical_stars
+    from .wing import render_canonical_stars
 
     ny, nx = image.shape
     good = good & np.isfinite(image)

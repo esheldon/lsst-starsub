@@ -15,9 +15,8 @@ import os
 import sys
 import numpy as np
 
-from lsst_starsub.template import (  # noqa
-    canonical_wing, read_template_file, write_canonical_wing,
-)
+from lsst_starsub.visit.template import canonical_wing, read_template_file
+from lsst_starsub.wing import write_canonical_wing
 
 CHI2_FACTOR = 5.0
 SLOPE_BOUND = -4.95
