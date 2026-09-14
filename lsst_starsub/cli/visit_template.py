@@ -1,6 +1,6 @@
 """
 cli/visit_template: the pooled per-visit star template and wing
-model (lsst_starsub.template) from all, or a subset, of the
+model (lsst_starsub.visit.template) from all, or a subset, of the
 visit's detectors
 
 Writes {outdir}/template-{visit}-{band}.fits and a png.  The
@@ -17,8 +17,15 @@ _WORKER = {}
 
 
 def get_args():
+    """
+    Parse the command line.
+
+    Returns
+    -------
+    args: argparse.Namespace
+    """
     import argparse
-    from ..visit import VISIT_COLLECTION, VISIT_REPO
+    from . import add_butler_arguments
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--visit', type=int, required=True)
@@ -33,8 +40,7 @@ def get_args():
     )
     parser.add_argument('--gaia-dir', required=True)
     parser.add_argument('--outdir', required=True)
-    parser.add_argument('--repo', default=VISIT_REPO)
-    parser.add_argument('--collection', default=VISIT_COLLECTION)
+    add_butler_arguments(parser)
     parser.add_argument('--nproc', type=int, default=1)
     parser.add_argument(
         '--save-extracts', action='store_true',
@@ -55,7 +61,20 @@ def get_args():
 
 
 def visit_detectors(butler, visit):
-    from ..visit import INSTRUMENT
+    """
+    List the detectors of a visit with a wcs and a calibration.
+
+    Parameters
+    ----------
+    butler: lsst.daf.butler.Butler
+    visit: int
+
+    Returns
+    -------
+    detectors: list of int
+        Sorted
+    """
+    from ..site import INSTRUMENT
 
     cat = butler.get(
         'visit_summary', dataId=dict(instrument=INSTRUMENT, visit=visit),
@@ -67,8 +86,23 @@ def visit_detectors(butler, visit):
 
 
 def extract_one(butler, visit, detector, gaia_path):
-    from ..template import extract_detector
-    from ..visit import load_gaia_for_exposure, load_visit_exposure
+    """
+    Load one detector and extract its template inputs.
+
+    Parameters
+    ----------
+    butler: lsst.daf.butler.Butler
+    visit, detector: int
+    gaia_path: str
+        The visit's Gaia file
+
+    Returns
+    -------
+    extract: dict
+        From lsst_starsub.visit.template.extract_detector
+    """
+    from ..visit.template import extract_detector
+    from ..visit.exposure import load_gaia_for_exposure, load_visit_exposure
 
     t0 = time.time()
     vexp = load_visit_exposure(butler, visit, detector)
@@ -79,7 +113,20 @@ def extract_one(butler, visit, detector, gaia_path):
 
 
 def _worker(args):
-    from ..visit import make_visit_butler
+    """
+    Run extract_one in a pool process, with a butler made once.
+
+    Parameters
+    ----------
+    args: tuple
+        repo, collection, visit, detector, gaia_path
+
+    Returns
+    -------
+    extract: dict
+        None when the detector failed
+    """
+    from ..visit.exposure import make_visit_butler
 
     repo, collection, visit, detector, gaia_path = args
     if 'butler' not in _WORKER:
@@ -92,8 +139,20 @@ def _worker(args):
 
 
 def read_extract(fname):
+    """
+    Read a saved per-detector extract.
+
+    Parameters
+    ----------
+    fname: str
+
+    Returns
+    -------
+    extract: dict
+        As extract_detector returns it
+    """
     import rustfits
-    from ..template import wing_edges
+    from ..visit.template import wing_edges
 
     with rustfits.FITS(fname) as fits:
         hdr = fits['stamps'].header
@@ -112,6 +171,15 @@ def read_extract(fname):
 
 
 def write_extract(fname, ext):
+    """
+    Write a per-detector extract.
+
+    Parameters
+    ----------
+    fname: str
+    ext: dict
+        From extract_detector
+    """
     import rustfits
 
     with rustfits.FITS(fname, 'w+') as fits:
@@ -127,8 +195,11 @@ def write_extract(fname, ext):
 
 
 def main():
-    from ..gaia import ensure_visit_gaia_file
-    from ..visit import make_visit_butler
+    """
+    Extract the detectors of a visit and pool their template.
+    """
+    from ..visit.gaia import ensure_visit_gaia_file
+    from ..visit.exposure import make_visit_butler
 
     sys.stdout.reconfigure(line_buffering=True)
     args = get_args()
@@ -185,7 +256,17 @@ def main():
 
 
 def pool_and_write(args, extracts):
-    from ..template import plot_template, pool_visit, write_template_file
+    """
+    Pool the extracts and write the template file and its png.
+
+    Parameters
+    ----------
+    args: argparse.Namespace
+        From get_args
+    extracts: list of dict
+        From extract_detector
+    """
+    from ..visit.template import plot_template, pool_visit, write_template_file
 
     pooled = pool_visit(extracts)
     band = pooled['params']['band']

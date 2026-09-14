@@ -1,6 +1,6 @@
 """
 cli/sim: the ideal-conditions simulation of one patch (see
-lsst_starsub.sim), followed by the cleaning of the chosen coadd
+lsst_starsub.visit.sim), followed by the cleaning of the chosen coadd
 state with every star's truth known.
 
 Writes {outdir}/sim-{tract}-{patch}-{band}-s{seed}.fits (the
@@ -21,11 +21,15 @@ import numpy as np
 def get_args():
     """
     Parse the command line.
+
+    Returns
+    -------
+    args: argparse.Namespace
     """
     import argparse
-    from ..sim import DEFAULTS
-    from ..visit import VISIT_COLLECTION, VISIT_REPO
-    from lsst_mdet.starsub import GSUB
+    from ..visit.sim import DEFAULTS
+    from . import add_butler_arguments
+    from ..census import GSUB
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--tract', type=int, default=7275)
@@ -34,8 +38,7 @@ def get_args():
     parser.add_argument('--gaia-file', required=True)
     parser.add_argument('--canonical', required=True)
     parser.add_argument('--outdir', required=True)
-    parser.add_argument('--repo', default=VISIT_REPO)
-    parser.add_argument('--collection', default=VISIT_COLLECTION)
+    add_butler_arguments(parser)
     parser.add_argument('--seed', type=int, default=None,
                         help='default: the patch number')
     parser.add_argument('--nproc', type=int, default=1)
@@ -65,11 +68,20 @@ def sim_geometry(butler, tract, patch, margin=150):
     """
     Get the tract wcs and the cell-coadd-sized patch box.
 
-    The tract wcs and the cell-coadd-sized patch box
+    Parameters
+    ----------
+    butler: lsst.daf.butler.Butler
+    tract, patch: int
+    margin: int, optional
+        Pixels beyond the patch inner box on each side
+
+    Returns
+    -------
+    wcs: ButlerWcs
+    box: SimpleBox
     """
-    from lsst_mdet.patchfiles import SimpleBox
-    from lsst_mdet.wcs import ButlerWcs
-    from ..visit import SKYMAP
+    from ..geom import ButlerWcs, SimpleBox
+    from ..site import SKYMAP
 
     skymap = butler.get('skyMap', skymap=SKYMAP)
     tr = skymap[tract]
@@ -82,9 +94,21 @@ def sim_geometry(butler, tract, patch, margin=150):
 def write_sim_file(fname, sim, truth_table, cfg, meta):
     """
     Write the simulation file.
+
+    Parameters
+    ----------
+    fname: str
+    sim: dict
+        From lsst_starsub.visit.sim.simulate_coadd
+    truth_table: structured array
+        The stars: x, y, G, ra, dec, core_flux, wing_scale
+    cfg: dict
+        The simulation settings
+    meta: dict
+        The run identity; written with cfg as a one-row table
     """
     import rustfits
-    from ..io import _meta_table
+    from ..coadd.io import _meta_table
 
     with rustfits.FITS(fname, 'w+') as fits:
         for name in ('none', 'response', 'stars', 'sky', 'raw', 'var'):
@@ -100,6 +124,16 @@ def write_sim_file(fname, sim, truth_table, cfg, meta):
 def read_sim_file(fname):
     """
     Read a simulation file.
+
+    Parameters
+    ----------
+    fname: str
+
+    Returns
+    -------
+    sim: dict
+        The coadds and the visit table, as simulate_coadd returns
+    truth_table: structured array
     """
     import rustfits
 
@@ -117,13 +151,18 @@ def main():
     """
     Simulate a patch and clean it.
     """
-    from lsst_mdet.defaults import DM_SAT
-    from lsst_mdet.gaia import GMAX, gaia_pixel_positions, read_gaia_file
-    from ..clean import clean_stem, clean_tag, run_clean, write_clean_file
-    from ..profiles import ambient_levels, measure_profiles
-    from ..sim import DEFAULTS, simulate_coadd
+    from ..gaia import GMAX, gaia_pixel_positions, read_gaia_file
+    from ..maskbits import DM_SAT
+    from ..coadd.clean import (
+        clean_stem,
+        clean_tag,
+        run_clean,
+        write_clean_file,
+    )
+    from ..visit.profiles import ambient_levels, measure_profiles
+    from ..visit.sim import DEFAULTS, simulate_coadd
     from ..wing import read_wing_model
-    from ..visit import VisitExposure, make_visit_butler
+    from ..visit.exposure import VisitExposure, make_visit_butler
 
     sys.stdout.reconfigure(line_buffering=True)
     args = get_args()

@@ -52,7 +52,7 @@ Disk rules out new images, so the product is the model, not pixels.
 - What has to be solved that the coadd version did not face: bright
   stars off the detector whose wings cross it.  At detector scale that
   is common, and there the wing is a plane, degenerate with the sky.
-  The per-visit Gaia extracts already cover the neighbours, and pinning
+  The per-visit Gaia extracts already cover the neighbors, and pinning
   off-detector stars to the prediction is what the coadd fit does at
   patch edges; at the visit level the prediction is better known.  It
   is the case to test first.
@@ -62,9 +62,9 @@ Disk rules out new images, so the product is the model, not pixels.
 A bilinear mesh: nodes every 256 px from the image origin, one extra
 row and column past the far edge (14 x 14 = 196 nodes on a 3300 px
 patch, ~17 x 17 on a 4k detector), each node a hat function, 1 at the
-node falling linearly to 0 at the neighbouring nodes.  The hats are
+node falling linearly to 0 at the neighboring nodes.  The hats are
 columns of the same linear system as the star wings, evaluated at the
-centres of the 4 x 4 cells the fit works on, weighted by each cell's
+centers of the 4 x 4 cells the fit works on, weighted by each cell's
 good-pixel count over its variance; one sparse normal-equation solve
 gives node values and amplitudes together, with a tiny ridge on the
 nodes so a node with no cells under it stays finite.  Rendering is a
@@ -85,11 +85,11 @@ Not a need, but two real advantages to the visit-wide view, and both
 can be had without one giant fit.
 
 - **Bright stars off the detector.**  A G 8 star's wing runs 3000 px,
-  across several detectors.  On a neighbouring detector it is nearly a
+  across several detectors.  On a neighboring detector it is nearly a
   plane and cannot be fit; on the detector holding the star the inner
   wing fixes the amplitude to a percent.  A visit-wide view lets the one
   measurement serve every detector the wing crosses; per detector alone
-  the neighbours carry a predicted wing with the shipped zero point's
+  the neighbors carry a predicted wing with the shipped zero point's
   few-percent uncertainty.  The far wing is exactly where the trough
   lived, so this is the case that matters.
 - **Sky continuity.**  The sky pattern (scattered light, the
@@ -112,7 +112,7 @@ tasks plus one visit-level gather (as skyCorr does):
 
 1. Per-detector joint fits, in parallel, as now.
 2. A visit-level consolidation: each star takes its amplitude from the
-   detector that holds its centre, where it is measured best; the wings
+   detector that holds its center, where it is measured best; the wings
    crossing other detectors are re-rendered with those amplitudes.
 3. A per-detector refit of the sky with the amplitudes held fixed, with
    the continuous focal-plane term and per-detector offsets in the sky

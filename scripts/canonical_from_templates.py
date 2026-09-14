@@ -10,14 +10,14 @@ scatter of the survivors.
 
 usage: python canonical_from_templates.py TEMPLATEDIR BAND OUT.fits
 """
+
 import glob
 import os
 import sys
 import numpy as np
 
-from lsst_starsub.template import (  # noqa
-    canonical_wing, read_template_file, write_canonical_wing,
-)
+from lsst_starsub.visit.template import canonical_wing, read_template_file
+from lsst_starsub.wing import write_canonical_wing
 
 CHI2_FACTOR = 5.0
 SLOPE_BOUND = -4.95
@@ -36,7 +36,9 @@ for f, p in zip(files, params):
     if slope <= SLOPE_BOUND:
         why.append(f'slope {slope:.2f} at the bound')
     if c2 > CHI2_FACTOR * chi2_med:
-        why.append(f'chi2 {c2:.0f} > {CHI2_FACTOR:.0f} x median {chi2_med:.0f}')
+        why.append(
+            f'chi2 {c2:.0f} > {CHI2_FACTOR:.0f} x median {chi2_med:.0f}'
+        )
     if why:
         print(f'  excluded {os.path.basename(f)}: ' + ', '.join(why))
     else:

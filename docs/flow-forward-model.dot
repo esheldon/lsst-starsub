@@ -1,0 +1,82 @@
+// the forward model of the visit polynomial (lsst_starsub.visit.forward):
+// how the calibrateImage star_background fit is reproduced and how its
+// response to the star wings, the source of the coadd trough, is
+// measured.  This is the visit-level half of the pipeline that was
+// built first; the trough correction on the coadds (response coadd,
+// forward input state, statistical restoration) was removed once the
+// joint fit (flow-joint.dot) made it unnecessary.  What
+// remains is the account of the trough and the DM background pass the
+// ideal simulation runs
+// render: dot -Tpdf docs/flow-forward-model.dot -o flow-forward-model.pdf
+//         dot -Tpng -Gdpi=110 docs/flow-forward-model.dot -o flow-forward-model.png
+digraph starsub_forward {
+    rankdir = TB;
+    fontname = "Helvetica";
+    node [shape=box, style="rounded,filled", fontname="Helvetica",
+          fontsize=11, fillcolor="#f4f4f4", color="#666666"];
+    edge [fontname="Helvetica", fontsize=9, color="#444444"];
+
+    // ------------------------------------------------------------
+    subgraph cluster_inputs {
+        label = "Butler inputs (per visit-detector)";
+        style = "rounded";
+        color = "#999999";
+        fontsize = 12;
+        node [fillcolor="#e8eef8"];
+        prelim [label="preliminary_visit_image\n(ADU) + its calibration"];
+        bg [label="preliminary_visit_image_background\nlayer 0: the 6x6 Chebyshev star_background fit\nlayers 1+: pedestals"];
+        meta [label="calibrateImage_metadata\nadaptive_threshold_value"];
+        vfile [label="an lsst-starsub-visit output:\nstar_model (the census wings, G < 19)\nand gaia_stars"];
+    }
+
+    // ------------------------------------------------------------
+    subgraph cluster_forward {
+        label = "A. The fit reproduced (visit/forward.py)";
+        style = "rounded";
+        color = "#b0743a";
+        fontsize = 12;
+        node [fillcolor="#f8ecdc"];
+        raw [label="raw sky image =\npreliminary image + stored background\n[load_raw_exposure]"];
+        maskr [label="rebuild the mask the fit saw:\nfirst-pass psf detection (10 sigma x 5, grown\n2.4 sigma) dilated 10 px, ORed with the star-\nbackground detection on the raw image at the\nstored adaptive threshold, grown 70 psf sigma\n[reconstruct_fit_mask]"];
+        refit [label="refit with the star_background config:\n128 px bins, MEANCLIP, weighted 6x6 Chebyshev,\nBAD / EDGE / DETECTED / NO_DATA ignored\n[fit_star_background]"];
+        resp [label="response = fit(raw) - fit(raw - stars),\nmask and variance held fixed (the fit is not\nlinear: the bin weights follow the pixel scatter,\nso the star image alone fits 15x too small)\n[polynomial_response]"];
+        raw -> maskr -> refit -> resp;
+    }
+
+    // ------------------------------------------------------------
+    subgraph cluster_users {
+        label = "B. Users";
+        style = "rounded";
+        color = "#5a7aa8";
+        fontsize = 12;
+        node [fillcolor="#e2e9f4"];
+        check [label="lsst-starsub-forward-check: one visit-detector;\nrefit vs stored layer 0, the response profiled\naround the brightest census stars against the\nstored polynomial's structure (order-2 surface\nremoved); forward-VISIT-DET.{png,fits}"];
+        sim [label="lsst-starsub-sim (visit/sim.py): simulated visits\nthrough the same pass (first-pass 50 sigma detection\non a 128 px flattened image, the adaptive threshold\nloop of _remeasure_star_background, the weighted fit);\nthe coadd of the responses is the 'forward' state,\nthe trough_dmask profiles its residual"];
+    }
+
+    // ------------------------------------------------------------
+    subgraph cluster_found {
+        label = "What it established";
+        style = "rounded,dashed";
+        color = "#999999";
+        fontsize = 12;
+        node [fillcolor="#ffffff", style="rounded,filled,dashed"];
+        f1 [label="the mask and the fit are reproduced: detected\nfractions match the log to 0.1 percent, the refit\nmatches the stored surface to 0.03-0.13 nJy rms"];
+        f2 [label="the trough is the polynomial's ringing: around a\nG 7.6 star the stored bump is +6.2 nJy at the star,\nzero at 950 px, -2 nJy at 1400 px (refit 5.8);\nbright stars are masked to ~200 px, so the bump is\nset by the wing just outside the mask"];
+        f3 [label="under the joint fit the forward and delivered\ninput states give identical results: the sky mesh\nabsorbs the trough, so no correction is applied\n(flow-joint.dot)"];
+        f1 -> f2 -> f3 [style=invis];
+    }
+
+    // ------------------------------------------------------------
+    // the data flow
+    prelim -> raw;
+    bg -> raw;
+    meta -> maskr;
+    vfile -> resp [label="star image (ADU)"];
+    bg -> check [label="stored layer 0"];
+    resp -> check;
+    refit -> sim [label="the same pass"];
+    check -> f1;
+    check -> f2;
+    sim -> f3;
+}

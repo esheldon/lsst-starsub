@@ -1,103 +1,331 @@
 """
-Gaia extracts for whole visits
+Gaia DR3 stars: the patch extracts and positions.
 
-lsst-mdet-make-gaia writes one file per tract; a visit's
-detectors span ten or so tracts, so the pooled per-visit
-template needs its own extract.  The same refcat shards and
-conversion are used (lsst_mdet.cli.make_gaia), over the bounding
-circle of the visit's detectors
+The patch extracts come from the per-tract files that
+lsst-starsub-make-gaia writes (read_gaia_file) or from the Gaia TAP
+service (fetch_gaia), cut to a circle around the patch and converted
+to one layout; gaia_pixel_positions propagates the proper motions and
+maps them to patch pixels.  The per-visit extracts of the visit project are
+lsst_starsub.visit.gaia.
 """
-import os
 
 import numpy as np
 
-from .visit import INSTRUMENT
 
-VISIT_GAIA_PATTERN = 'gaia-dr3-visit-{visit}.fits'
-VISIT_MARGIN_DEG = 0.05
-DEFAULT_GMAX = 21.0
+# Gaia positions are queried at the catalog epoch and
+# propagated by proper motion to the approximate observation
+# epoch
+GAIA_EPOCH = 2016.0
+OBS_EPOCH = 2025.0
+GMAX = 19.0         # download depth
+
+# TAP sync endpoints serving gaiadr3.gaia_source with the same
+# query dialect and csv output; tried in order.  ESA is the
+# canonical archive, ARI Heidelberg a full mirror (ESA has been
+# observed to reset connections during outages)
+GAIA_TAP_URLS = [
+    'https://gea.esac.esa.int/tap-server/tap/sync',
+    'https://gaia.ari.uni-heidelberg.de/tap/sync',
+]
+
+GAIA_ADQL = (
+    'SELECT source_id, ra, dec, pmra, pmdec, parallax, '
+    'phot_g_mean_mag, phot_bp_mean_mag, phot_rp_mean_mag, ruwe '
+    'FROM gaiadr3.gaia_source '
+    "WHERE 1=CONTAINS(POINT('ICRS', ra, dec), "
+    "CIRCLE('ICRS', {ra:.6f}, {dec:.6f}, {rad:.4f})) "
+    'AND phot_g_mean_mag < {gmax}'
+)
 
 
-def visit_gaia_path(gaia_dir, visit):
-    return os.path.join(gaia_dir, VISIT_GAIA_PATTERN.format(visit=int(visit)))
-
-
-def visit_circle(butler, visit):
+def fetch_gaia(wcs, bbox, gmax=GMAX):
     """
-    the bounding circle of the detectors with a wcs in the
-    visit summary, grown by VISIT_MARGIN_DEG
+    Fetch the Gaia DR3 stars of a patch from the TAP service.
+
+    A sync query (a few seconds) of the circle centered on the patch,
+    of corner radius plus a margin for the off-patch intruders, tried
+    on each of GAIA_TAP_URLS in turn.
+
+    Parameters
+    ----------
+    wcs: ButlerWcs or FileWcs
+        For the patch's sky position
+    bbox: box
+        The patch's bounding box
+    gmax: float, optional
+        Stars brighter than this; default GMAX
 
     Returns
     -------
-    lsst.sphgeom.Circle
+    gaia: structured array
+        ra, dec, pmra, pmdec, phot_g_mean_mag, ruwe, sorted by G
     """
-    import lsst.sphgeom as sphgeom
+    import io
+    import urllib.request
+    import urllib.parse
 
-    cat = butler.get(
-        'visit_summary', dataId=dict(instrument=INSTRUMENT, visit=int(visit)),
+    xmid = 0.5 * (bbox.x.start + bbox.x.stop)
+    ymid = 0.5 * (bbox.y.start + bbox.y.stop)
+    ctr = wcs.pixelToSky(xmid, ymid)
+    corner = wcs.pixelToSky(
+        float(bbox.x.start), float(bbox.y.start),
     )
-    vecs = []
-    for rec in cat:
-        wcs = rec.getWcs()
-        if wcs is None:
-            continue
-        bbox = rec.getBBox()
-        for corner in bbox.getCorners():
-            c = wcs.pixelToSky(float(corner.x), float(corner.y))
-            v = c.getVector()
-            vecs.append([v.x(), v.y(), v.z()])
-    vecs = np.array(vecs)
-    if vecs.size == 0:
-        raise RuntimeError(f'visit {visit}: no detector has a wcs')
-    mean = vecs.mean(axis=0)
-    mean /= np.linalg.norm(mean)
-    cosang = np.clip(vecs @ mean, -1, 1)
-    radius = np.rad2deg(np.arccos(cosang).max()) + VISIT_MARGIN_DEG
-    center = sphgeom.UnitVector3d(float(mean[0]), float(mean[1]),
-                                  float(mean[2]))
-    return sphgeom.Circle(center, sphgeom.Angle.fromDegrees(radius))
+    rad = ctr.separation(corner).asDegrees() + 0.02
+
+    query = GAIA_ADQL.format(
+        ra=ctr.getRa().asDegrees(),
+        dec=ctr.getDec().asDegrees(),
+        rad=rad,
+        gmax=gmax,
+    )
+
+    print(query)
+
+    data = urllib.parse.urlencode({
+        'REQUEST': 'doQuery',
+        'LANG': 'ADQL',
+        'FORMAT': 'csv',
+        'QUERY': query,
+    }).encode()
+
+    text = None
+    errors = []
+
+    for url in GAIA_TAP_URLS:
+        try:
+            with urllib.request.urlopen(
+                url, data=data, timeout=120,
+            ) as resp:
+                text = resp.read().decode()
+            if not text.startswith('source_id'):
+                raise RuntimeError(
+                    'unexpected TAP response: ' + text[:200],
+                )
+            break
+        except (OSError, RuntimeError, UnicodeDecodeError) as err:
+            # OSError covers the whole network family (URLError,
+            # HTTPError, connection resets, timeouts, ssl);
+            # RuntimeError is our own unexpected-response check,
+            # so an error page from one mirror falls through to
+            # the next
+            print(f'    gaia query failed at {url}: {err}')
+            errors.append(f'{url}: {err}')
+            text = None
+
+    if text is None:
+        raise RuntimeError(
+            'all gaia TAP services failed:\n    '
+            + '\n    '.join(errors)
+        )
+
+    gaia = np.genfromtxt(
+        io.StringIO(text), delimiter=',', names=True,
+    )
+
+    print(f'    gaia: {gaia.size} stars')
+    return gaia
 
 
-def make_visit_gaia_file(butler, visit, outfile, gmax=DEFAULT_GMAX):
+def read_gaia_file(fname, wcs, bbox, gmax=GMAX):
     """
-    write the Gaia stars in the visit's bounding circle brighter
-    than gmax to outfile, in the lsst-mdet-make-gaia layout
+    Read the Gaia stars of a patch from a file.
+
+    Converted to the fetch_gaia layout so everything downstream is
+    unchanged; the same circle as the TAP query is applied, plus the
+    gmax cut.  FITS files (lsst-starsub-make-gaia output, or any with
+    a table in the first extension) are read with rustfits, parquet
+    files with pandas.  Required columns are ra, dec (degrees) and a
+    G magnitude, phot_g_mean_mag or gaia_g_mag.  Proper motions pmra,
+    pmdec (mas/yr, pmra including cos(dec)) are used when present,
+    else set to zero and the positions used as given.  ruwe is not
+    carried by the files and is set to 1 (the template
+    astrometric-quality guard passes everything).
+
+    Parameters
+    ----------
+    fname: str
+        The file
+    wcs: ButlerWcs or FileWcs
+        For the patch's sky position
+    bbox: box
+        The patch's bounding box
+    gmax: float, optional
+        Stars brighter than this; default GMAX
+
+    Returns
+    -------
+    gaia: structured array
+        As fetch_gaia
     """
-    import rustfits
-    from lsst_mdet.cli.make_gaia import (
-        REFCAT, convert_shard, get_shard_ids, in_circle,
+    if fname.endswith('.parq') or fname.endswith('.parquet'):
+        import pandas as pd
+        data = pd.read_parquet(fname)
+        columns = list(data.columns)
+    else:
+        import rustfits
+        data = rustfits.read(fname)
+        columns = list(data.dtype.names)
+
+    if 'phot_g_mean_mag' in columns:
+        gmag = data['phot_g_mean_mag']
+    else:
+        gmag = data['gaia_g_mag']
+
+    if 'pmra' in columns and 'pmdec' in columns:
+        pmra = data['pmra']
+        pmdec = data['pmdec']
+    else:
+        pmra = None
+        pmdec = None
+
+    gaia = gaia_from_columns(
+        ra=data['ra'],
+        dec=data['dec'],
+        gmag=gmag,
+        wcs=wcs,
+        bbox=bbox,
+        gmax=gmax,
+        pmra=pmra,
+        pmdec=pmdec,
     )
 
-    circle = visit_circle(butler, visit)
-    shard_ids = get_shard_ids(circle)
-    parts = [
-        convert_shard(butler.get(REFCAT, htm7=shard_id))
-        for shard_id in shard_ids
-    ]
-    stars = np.concatenate(parts)
-    keep = (
-        in_circle(circle, stars['ra'], stars['dec'])
-        & np.isfinite(stars['phot_g_mean_mag'])
-        & (stars['phot_g_mean_mag'] < gmax)
-    )
-    stars = stars[keep]
-    stars = stars[np.argsort(stars['source_id'], kind='stable')]
-    print(
-        f'    visit {visit}: circle radius '
-        f'{circle.getOpeningAngle().asDegrees():.2f} deg, '
-        f'{len(shard_ids)} shards, {stars.size} stars to G < {gmax:g}, '
-        f'writing {outfile}'
-    )
-    os.makedirs(os.path.dirname(os.path.abspath(outfile)), exist_ok=True)
-    tmpfile = outfile + '.tmp'
-    rustfits.write(tmpfile, stars, extname='gaia')
-    os.replace(tmpfile, outfile)
-    return outfile
+    print(f'    gaia from {fname}: {gaia.size} stars')
+    return gaia
 
 
-def ensure_visit_gaia_file(butler, visit, gaia_dir, gmax=DEFAULT_GMAX):
-    """the per-visit file's path, made if missing"""
-    path = visit_gaia_path(gaia_dir, visit)
-    if not os.path.exists(path):
-        make_visit_gaia_file(butler, visit, path, gmax=gmax)
-    return path
+def gaia_from_columns(
+    ra, dec, gmag, wcs, bbox, gmax=GMAX, pmra=None, pmdec=None,
+):
+    """
+    Build the fetch_gaia layout from plain position and magnitude arrays.
+
+    The same patch circle as the TAP query and the gmax cut are
+    applied.
+
+    Parameters
+    ----------
+    ra, dec: arrays
+        Degrees
+    gmag: array
+        Gaia G
+    wcs: ButlerWcs or FileWcs
+        For the patch's sky position
+    bbox: box
+        The patch's bounding box
+    gmax: float, optional
+        Stars brighter than this; default GMAX
+    pmra, pmdec: arrays, optional
+        Proper motions, mas/yr, pmra including cos(dec); zero when
+        absent
+
+    Returns
+    -------
+    gaia: structured array
+        As fetch_gaia
+    """
+    xmid = 0.5 * (bbox.x.start + bbox.x.stop)
+    ymid = 0.5 * (bbox.y.start + bbox.y.stop)
+
+    ctr = wcs.pixelToSky(xmid, ymid)
+    corner = wcs.pixelToSky(
+        float(bbox.x.start), float(bbox.y.start),
+    )
+
+    rad = ctr.separation(corner).asDegrees() + 0.02
+
+    ra = np.asarray(ra, dtype='f8')
+    dec = np.asarray(dec, dtype='f8')
+    gmag = np.asarray(gmag, dtype='f8')
+
+    ra0 = np.deg2rad(ctr.getRa().asDegrees())
+    dec0 = np.deg2rad(ctr.getDec().asDegrees())
+    rar = np.deg2rad(ra)
+    decr = np.deg2rad(dec)
+
+    cossep = (
+        np.sin(dec0) * np.sin(decr)
+        + np.cos(dec0) * np.cos(decr) * np.cos(rar - ra0)
+    )
+
+    sep = np.rad2deg(np.arccos(np.clip(cossep, -1, 1)))
+
+    w, = np.where((sep <= rad) & (gmag < gmax))
+    gaia = np.zeros(w.size, dtype=[
+        ('ra', 'f8'), ('dec', 'f8'),
+        ('pmra', 'f8'), ('pmdec', 'f8'),
+        ('phot_g_mean_mag', 'f8'), ('ruwe', 'f8'),
+    ])
+
+    gaia['ra'] = ra[w]
+    gaia['dec'] = dec[w]
+    gaia['phot_g_mean_mag'] = gmag[w]
+
+    if pmra is not None:
+        gaia['pmra'] = np.asarray(pmra, dtype='f8')[w]
+        gaia['pmdec'] = np.asarray(pmdec, dtype='f8')[w]
+
+    gaia['ruwe'] = 1.0
+    return gaia
+
+
+def gaia_pixel_positions(gaia, wcs, bbox):
+    """
+    Get the stars' patch-frame pixel positions at the observation epoch.
+
+    The proper motions are propagated from GAIA_EPOCH to OBS_EPOCH.
+
+    Parameters
+    ----------
+    gaia: structured array
+        The extract (fetch_gaia layout)
+    wcs: ButlerWcs or FileWcs
+        The image's wcs
+    bbox: box
+        The image's bounding box
+
+    Returns
+    -------
+    x, y: arrays
+        Pixel positions relative to the box origin
+    """
+    dt = OBS_EPOCH - GAIA_EPOCH
+    pmra = np.nan_to_num(gaia['pmra'])
+    pmdec = np.nan_to_num(gaia['pmdec'])
+    cosd = np.cos(np.deg2rad(gaia['dec']))
+    ra = gaia['ra'] + dt * pmra / 3.6e6 / cosd
+    dec = gaia['dec'] + dt * pmdec / 3.6e6
+
+    x, y = wcs.skyToPixelArray(ra, dec, degrees=True)
+    return x - bbox.x.start, y - bbox.y.start
+
+
+def fetch_gaia_or_none(wcs, bbox, gmax=GMAX, require=False):
+    """
+    Fetch the Gaia stars of a patch, or report the failure.
+
+    Parameters
+    ----------
+    wcs, bbox, gmax:
+        As fetch_gaia
+    require: bool, optional
+        Raise on failure (never proceed silently without stars when
+        the caller asked for star handling); otherwise the error is
+        printed and None returned so the caller can degrade
+        gracefully
+
+    Returns
+    -------
+    gaia: structured array or None
+    """
+    try:
+        return fetch_gaia(wcs, bbox, gmax=gmax)
+    except RuntimeError as err:
+        # the only expected failure: all mirrors exhausted
+        # (per-mirror errors are consumed inside fetch_gaia)
+        if require:
+            raise RuntimeError(
+                'gaia download failed and star subtraction '
+                'was requested'
+            ) from err
+        print('    gaia download failed:', err)
+        return None

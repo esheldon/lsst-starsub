@@ -4,13 +4,14 @@ cli/cell_clean: the star-free, sky-flat coadd of one patch
 The delivered cell coadd is stitched from the butler (the object
 background restored; the per-visit polynomials' trough is in, the
 joint fit's sky mesh absorbs it), the Gaia census and star masks
-are built as lsst_mdet does, and the star model is one of
+are built as in production (lsst_starsub.census), and the star
+model is one of
 
     joint      the canonical wing shape with the per-star
                amplitudes and a bilinear sky mesh solved
                together (lsst_starsub.joint): the production
                model
-    template   lsst_mdet's own sequential scheme: sky passes with
+    template   the stamp route's sequential scheme: sky passes with
                the stars excluded, the template from the coadd's
                stamps, anchor-ring amplitudes (the comparison
                baseline; --bright-grow, --nround apply)
@@ -38,10 +39,14 @@ STATE = 'none'
 def get_args():
     """
     Parse the command line.
+
+    Returns
+    -------
+    args: argparse.Namespace
     """
     import argparse
-    from ..visit import VISIT_COLLECTION, VISIT_REPO
-    from lsst_mdet.starsub import GSUB
+    from . import add_butler_arguments
+    from ..census import GSUB
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--tract', type=int, required=True)
@@ -51,8 +56,7 @@ def get_args():
     parser.add_argument('--canonical', required=True,
                         help='the wing file (lsst_starsub.wing)')
     parser.add_argument('--outdir', required=True)
-    parser.add_argument('--repo', default=VISIT_REPO)
-    parser.add_argument('--collection', default=VISIT_COLLECTION)
+    add_butler_arguments(parser)
     parser.add_argument('--gsub', type=float, default=GSUB)
     parser.add_argument('--star-model', default='joint',
                         choices=['joint', 'template', 'canonical'])
@@ -67,7 +71,7 @@ def get_args():
     parser.add_argument(
         '--bright-grow', type=float, default=None,
         help='template model: exclude this many pixels beyond the '
-             'bright-star masks from the 64 px sky passes (lsst_mdet '
+             'bright-star masks from the 64 px sky passes (stamp '
              'coadd route: 128); default 12 px like every other mask',
     )
     parser.add_argument('--no-images', action='store_true',
@@ -92,12 +96,16 @@ def main():
     """
     Clean one patch coadd.
     """
-    from lsst_mdet.gaia import GMAX, gaia_pixel_positions, read_gaia_file
-    from lsst_mdet.patchfiles import SimpleBox
-    from lsst_mdet.wcs import ButlerWcs
-    from ..clean import clean_stem, clean_tag, run_clean, write_clean_file
-    from ..coadd import coadd_data_id, load_cell_coadd
-    from ..visit import VisitExposure, convert_mask, make_visit_butler
+    from ..gaia import GMAX, gaia_pixel_positions, read_gaia_file
+    from ..geom import ButlerWcs, SimpleBox
+    from ..coadd.clean import (
+        clean_stem,
+        clean_tag,
+        run_clean,
+        write_clean_file,
+    )
+    from ..coadd.cellcoadd import coadd_data_id, load_cell_coadd
+    from ..visit.exposure import VisitExposure, convert_mask, make_visit_butler
     from ..wing import read_wing_model
 
     sys.stdout.reconfigure(line_buffering=True)
@@ -143,10 +151,14 @@ def main():
     truth = None
     if args.inject:
         from scipy import ndimage
-        from lsst_mdet.starsub import build_star_mask, select_stars
+        from ..census import build_star_mask, select_stars
         from ..inject import (
-            DEFAULT_PLAN, census_rows, draw_positions, injected_table,
-            parse_plan, render_injected,
+            DEFAULT_PLAN,
+            census_rows,
+            draw_positions,
+            injected_table,
+            parse_plan,
+            render_injected,
         )
         # the existing star masks, to keep the injected centers clear
         x0, y0 = gaia_pixel_positions(gaia, wcs, tbox)

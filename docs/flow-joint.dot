@@ -1,7 +1,9 @@
-// the simplified pipeline: delivered coadd, one joint fit of the
-// star amplitudes and the sky, subtract.  No visit-level response
-// (the mesh absorbs the trough; see flow-full-forward.dot for the
-// forward-model pipeline that established that)
+// the production star route: delivered coadd, one joint fit of the
+// star amplitudes and the sky per band, subtract, then the faint
+// stars' wings; lsst_mdet runs it per patch inside the metadetection
+// job (--starsub-method joint).  No visit-level response (the mesh
+// absorbs the trough; see flow-forward-model.dot for the forward model
+// of the visit polynomial that established that)
 // render: dot -Tpdf docs/flow-joint.dot -o flow-joint.pdf
 //         dot -Tpng -Gdpi=110 docs/flow-joint.dot -o flow-joint.png
 digraph starsub_joint {
@@ -18,57 +20,71 @@ digraph starsub_joint {
         color = "#999999";
         fontsize = 12;
         node [fillcolor="#e8eef8"];
-        coadd [label="deep_coadd cell coadd, as delivered\n(per-visit polynomials subtracted:\nthe trough is in; object background restored)"];
-        gaia [label="Gaia DR3 refcat\nper-tract extract, G < 19"];
+        coadd [label="deep_coadd cell coadd, as delivered\n(per-visit polynomials subtracted: the trough is in)\nobject background undone -> the 'None' state\n[coadd.starsub.handle_stars_joint]"];
+        gaia [label="Gaia DR3 refcat, per-tract files\nG < 21 (WING_GMAX)\n[lsst-starsub-make-gaia]"];
     }
 
     // ------------------------------------------------------------
     subgraph cluster_tmpl {
-        label = "A. Wing calibration (once per band)";
+        label = "A. Wing calibration (once per band, visit project)";
         style = "rounded";
         color = "#7a9a5a";
         fontsize = 12;
         node [fillcolor="#eaf3df"];
-        canon [label="canonical wing T(r), nJy per unit Gaia flux,\ncore included, to 3000 px:\nmedian over visits of the pooled per-visit\ntemplates (stamps 10-50 px + wing cloud)\n[lsst-starsub-visit-template]"];
+        canon [label="canonical wing T(r), nJy per unit Gaia flux,\ncore included, to 3000 px:\nmedian over visits of the pooled per-visit\ntemplates (stamps 10-50 px + wing cloud)\n[lsst-starsub-visit-template, scripts/band_wing.sh]"];
     }
 
     // ------------------------------------------------------------
     subgraph cluster_prep {
-        label = "B. Census and masks (per patch, lsst_mdet machinery)";
+        label = "B. Census and masks (per patch and band, census.patch_census)";
         style = "rounded";
         color = "#5a7aa8";
         fontsize = 12;
         node [fillcolor="#e2e9f4"];
-        census [label="Gaia census: on-image stars and the\noff-image intruders within 210 px;\nmask circles by G (20-450 px),\nSAT / INTRP components"];
-        pinned [label="pinned stars: off the image or fainter\nthan G 17, at the prediction (A = 1),\nrendered and subtracted first\n(their wing on the image is a plane)"];
+        census [label="Gaia census to G 19 (GSUB): on-image stars\nand the off-image intruders whose zone reaches in;\nmask circles by G (45 px at G 15, x 10^(0.115 (15 - G)),\ncapped 450 px), SAT / INTRP components;\ndstar = distance off the mask"];
+        pinned [label="pinned stars: off the image or fainter\nthan G 17 (GFIT), at the prediction (A = 1),\nrendered and subtracted first\n(their wing on the image is a plane)"];
         census -> pinned;
     }
 
     // ------------------------------------------------------------
     subgraph cluster_joint {
-        label = "C. Joint fit (per patch, lsst_starsub.joint)";
+        label = "C. Joint fit (per patch and band, lsst_starsub.joint.joint_fit)";
         style = "rounded";
         color = "#8a5a9a";
         fontsize = 12;
         node [fillcolor="#efe3f3"];
-        cells [label="4 x 4 binned cells outside the star masks,\nthe bad pixels and the detections;\nweight = pixels per cell"];
-        design [label="columns: one per free star (canonical shape,\nA = 1 the prediction, windowed to where\nit falls below 0.005 nJy) + bilinear sky\nmesh, 256 px nodes"];
+        cells [label="4 x 4 binned cells outside the star masks\nand the bad pixels; weight = good pixels\nover the mean variance"];
+        design [label="columns: one per free star (canonical shape,\nA = 1 the prediction, windowed to where it\nfalls below 0.005 nJy) + bilinear sky mesh,\n256 px nodes; priors: A about 1 (sigma 0.3),\nneighbouring nodes within 0.1 sky sigma"];
         solve [label="weighted least squares:\nimage = sum A_k F_k T(r - r_k) + S(x)\n(sparse normal equations, ~200 + N_star unknowns)"];
-        seg [label="pass 2: re-segment the residual with the\nmetadetection settings (0.8 arcsec kernel,\n0.8 sigma, minarea 4, grown 4 px), re-solve"];
+        seg [label="pass 2: segment image - pass-1 star model with the\nmetadetection settings (0.8 arcsec kernel, 0.8 sigma,\nminarea 4), grown 4 px; sources over 3000 px masked\nto an ellipse (isophote + 4 rms sizes, <= 650 px);\nlarge segments with median < 1.6 sigma are cirrus:\nleft to the sky fit, returned as 'diffuse'; re-solve"];
         cells -> design -> solve -> seg;
         seg -> solve [label="once", constraint=false];
     }
 
     // ------------------------------------------------------------
     subgraph cluster_out {
-        label = "D. Output (per patch)";
+        label = "D. Subtraction (per patch and band)";
         style = "rounded";
         color = "#b0743a";
         fontsize = 12;
         node [fillcolor="#f8ecdc"];
-        model [label="star model: A_k F_k T(r) for every\ncensus star, to 3000 px\nsky: the mesh at full resolution"];
-        resid [label="residual = coadd - sky - star model:\nstar-free, sky-flat coadd\n[lsst-starsub-cell-clean --star-model joint]"];
-        model -> resid;
+        model [label="image -= sky mesh at full resolution\nimage -= star model: A_k F_k T(r) for every\ncensus star, to 3000 px"];
+        faint [label="faint-star wings, G 19-21 (subtract_faint_wings):\npredicted wing per star, amplitude from its own\ncore (5 px aperture, 0.25-4 x the prediction),\ntapered in over 8-16 px; cores stay, not masked"];
+        model -> faint;
+    }
+
+    // ------------------------------------------------------------
+    subgraph cluster_mdet {
+        label = "E. Masks and footprint (lsst_mdet.cells, all bands)";
+        style = "rounded";
+        color = "#a85a5a";
+        fontsize = 12;
+        node [fillcolor="#f6e4e4"];
+        taper [label="star zones: dstar = min over bands;\nimage and noise tapered to zero over\n12 px (APOD_STARS) outside the circles\n(the image is zeroed, so it is tapered)"];
+        diffuse [label="diffuse zones: union over bands of 'diffuse',\ngrown 256 px (DIFFUSE_MARGIN); pixels left\nin the image, no taper: zero weight, bmask 1,\nmfrac 1, cleared from the footprint"];
+        mdet [label="metadetection on the cleaned cells;\nstarsub_meta / stars / sky / wing tables\nin the output (make_fit_tables)"];
+        taper -> mdet;
+        diffuse -> mdet;
     }
 
     // ------------------------------------------------------------
@@ -79,10 +95,9 @@ digraph starsub_joint {
         fontsize = 12;
         node [fillcolor="#ffffff", style="rounded,filled,dashed"];
         v1 [label="ideal simulation (lsst-starsub-sim):\nresidual, sky error and model error\nwithin 2 x 10^-3 sigma at the mask edge"];
-        v2 [label="injection into the real coadds:\ninjected stars within 3 x 10^-3 sigma;\nreal stars -1 / -10 / -3 at 55 / 105 / 205 px\n(the wing shape, ~4 percent at 100 px)"];
-        v3 [label="delivered vs forward input state:\nidentical (the mesh absorbs the trough)"];
-        v4 [label="metadetection on cleaned patches\nvs the current product"];
-        v1 -> v2 -> v3 -> v4 [style=invis];
+        v2 [label="object injection into the real coadds\n(lsst-mdet-inject-node): near cirrus, flux\nbias to ~200-250 px -> the 256 px margin;\nnear G 19-21 stars +2.4/+1.2/+1.7 percent (r/i/z)\n-> +1.0/0.0/+0.5 with the faint wings;\n+2 percent just outside the census masks remains"];
+        v3 [label="600-patch runs vs the template route\n(run-dp2-test-joint3/4): shear sample +12 percent\n(fewer NONPOS_SIZE), R 0.82 vs 0.87;\nstar gamma_t zero beyond 0.3 arcmin;\nsource-count excess near G 18-21 stars gone"];
+        v1 -> v2 -> v3 [style=invis];
     }
 
     // ------------------------------------------------------------
@@ -91,13 +106,16 @@ digraph starsub_joint {
     gaia -> census;
     canon -> pinned;
     canon -> design;
-    coadd -> cells [label="none state"];
+    canon -> faint;
+    gaia -> faint [label="G 19-21"];
+    coadd -> cells [label="None state"];
     pinned -> cells [label="subtracted"];
     census -> cells [label="masks"];
     solve -> model;
-    coadd -> resid;
-    resid -> v1;
-    resid -> v2;
-    resid -> v3;
-    resid -> v4;
+    census -> taper [label="dstar"];
+    seg -> diffuse [label="diffuse"];
+    faint -> taper;
+    mdet -> v1;
+    mdet -> v2;
+    mdet -> v3;
 }

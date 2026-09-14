@@ -24,7 +24,7 @@ for tr in $tracts; do
 done
 if [ -n "$missing" ]; then
   echo "making Gaia files for tracts:$missing"
-  (cd $base/gaia && lsst-mdet-make-gaia --tracts $missing --outdir . \
+  (cd $base/gaia && lsst-starsub-make-gaia --tracts $missing --outdir . \
      --repo dp2_prep --collections LSSTCam/runs/DRP/w_2026_32/DM-55677 \
      --refcat-collection refcats/DM-39298/gaia_dr3_20230707 \
      --skip-existing > make-gaia-broadcal-$pass.log 2>&1)

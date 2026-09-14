@@ -7,21 +7,31 @@ the cell coadd the visit_summary and the stored visit background
 
 
 def get_args():
+    """
+    Parse the command line.
+
+    Returns
+    -------
+    args: argparse.Namespace
+    """
     import argparse
-    from ..visit import VISIT_COLLECTION, VISIT_REPO
+    from . import add_butler_arguments
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--tract', type=int, required=True)
     parser.add_argument('--patch', type=int, required=True)
     parser.add_argument('--band', default='i')
-    parser.add_argument('--repo', default=VISIT_REPO)
-    parser.add_argument('--collection', default=VISIT_COLLECTION)
+    add_butler_arguments(parser)
     return parser.parse_args()
 
 
 def main():
-    from ..coadd import coadd_data_id
-    from ..visit import INSTRUMENT, make_visit_butler
+    """
+    Report which datasets a butler holds for a patch.
+    """
+    from ..coadd.cellcoadd import coadd_data_id
+    from ..site import INSTRUMENT
+    from ..visit.exposure import make_visit_butler
 
     args = get_args()
     butler = make_visit_butler(args.repo, args.collection)
@@ -40,7 +50,7 @@ def main():
             ok &= bool(have)
 
     try:
-        from ..coadd import load_cell_coadd
+        from ..coadd.cellcoadd import load_cell_coadd
         mcoadd = load_cell_coadd(butler, did)
     except Exception as err:
         print(f'  cannot read the cell coadd ({err!r}); stopping')

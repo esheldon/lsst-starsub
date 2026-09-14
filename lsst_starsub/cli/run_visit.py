@@ -16,17 +16,23 @@ import numpy as np
 
 
 def get_args():
+    """
+    Parse the command line.
+
+    Returns
+    -------
+    args: argparse.Namespace
+    """
     import argparse
-    from ..visit import VISIT_COLLECTION, VISIT_REPO
-    from lsst_mdet.starsub import GSUB
+    from . import add_butler_arguments
+    from ..census import GSUB
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--tract', type=int, required=True)
     parser.add_argument('--patch', type=int, required=True)
     parser.add_argument('--band', default='i')
     parser.add_argument('--outdir', required=True)
-    parser.add_argument('--repo', default=VISIT_REPO)
-    parser.add_argument('--collection', default=VISIT_COLLECTION)
+    add_butler_arguments(parser)
     parser.add_argument(
         '--nbest', type=int, default=1,
         help='process this many coadd inputs, best IQ first',
@@ -66,6 +72,22 @@ def get_args():
 
 
 def output_name(outdir, tract, patch, band, visit, detector, ext):
+    """
+    Build the per-detector output path.
+
+    Parameters
+    ----------
+    outdir: str
+    tract, patch: int
+    band: str
+    visit, detector: int
+    ext: str
+        The extension, without the dot
+
+    Returns
+    -------
+    path: str
+    """
     return os.path.join(
         outdir,
         f'{tract:05d}-{patch:02d}-{band}-{visit}-{detector:03d}.{ext}',
@@ -73,13 +95,28 @@ def output_name(outdir, tract, patch, band, visit, detector, ext):
 
 
 def process_one(butler, visit, detector, args, iq_score=np.nan):
-    from lsst_mdet.starsub import field_segmentation
-    from ..profiles import ambient_levels, measure_profiles
-    from ..visit import (
-        build_wide_star_mask, handle_stars_visit, iq_tier,
-        load_gaia_for_exposure, load_visit_exposure,
+    """
+    Characterize one visit-detector and write its outputs.
+
+    Parameters
+    ----------
+    butler: lsst.daf.butler.Butler
+    visit, detector: int
+    args: argparse.Namespace
+        From get_args
+    iq_score: float, optional
+        The shapelets IQ score, for the record
+    """
+    from ..census import field_segmentation
+    from ..visit.profiles import ambient_levels, measure_profiles
+    from ..visit.exposure import (
+        build_wide_star_mask,
+        handle_stars_visit,
+        iq_tier,
+        load_gaia_for_exposure,
+        load_visit_exposure,
     )
-    from ..io import write_visit_file, plot_summary
+    from ..coadd.io import write_visit_file, plot_summary
 
     print(
         f'visit {visit} detector {detector} '
@@ -133,7 +170,7 @@ def process_one(butler, visit, detector, args, iq_score=np.nan):
         fwhm=res['fwhm'] if res['fwhm'] is not None else -1.0,
     )
     if args.profiles_only:
-        from ..io import write_profiles_file
+        from ..coadd.io import write_profiles_file
         stem = os.path.basename(output_name(
             args.outdir, args.tract, args.patch, band, visit,
             detector, 'fits',
@@ -167,8 +204,13 @@ def process_one(butler, visit, detector, args, iq_score=np.nan):
 
 
 def main():
-    from ..visit import (
-        load_iq_scores, make_visit_butler, select_coadd_inputs,
+    """
+    Characterize the coadd inputs of a patch, or one visit-detector.
+    """
+    from ..visit.exposure import (
+        load_iq_scores,
+        make_visit_butler,
+        select_coadd_inputs,
     )
 
     import sys

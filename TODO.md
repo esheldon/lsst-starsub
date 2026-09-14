@@ -56,7 +56,7 @@ stars) with `lsst-starsub-cell-restore` and `lsst-starsub-make-slurm-cells`:
   `object` state reproduces the dual-state plot A.
 - Tract 2562, the typical-depth check (i; the 31 patches with good
   cells, cells with >= 3 inputs via `--good-cells` and `--min-inputs`;
-  2460 profile rows, 70 stars at G < 13): same behaviour at low
+  2460 profile rows, 70 stars at G < 13): same behavior at low
   statistics.  The bright-star `None` trough at 305 px, -26 +- 6,
   becomes -6 +- 7 restored; errors inflated ~40 percent, not the
   factor 3 seen before the order-2 removal.  Per cell the offsets are
@@ -323,7 +323,12 @@ template job per detector of the 28 visits, `extracts-{visit}/`).
   (aureole slope at its bound, tiny amplitude) while the physical
   wing, 1.26 x 10^4 at 300 px, is normal.
 
-## Steps
+## History
+
+The steps as planned on 2026-09-07 and how each ended; all are
+complete (2026-09-14).  The production route is the joint fit
+(7c-7k), described in `docs/flow-joint.dot`; the forward model of
+the visit polynomial is kept as `docs/flow-forward-model.dot`.
 
 1. **Restore the polynomial at the coadd level.**  DONE (see status
    above).  The statistical restoration stays as the deep-field method
@@ -532,7 +537,7 @@ template job per detector of the 28 visits, `extracts-{visit}/`).
      residual +27, +4, +1; sky error -34, -33, -25, -17, -10; model
      error -62, -38, -30, -21, -11.  As fractions of the wing this
      is the data's signature (sky 13-50 percent, model 24-58
-     percent, cancelling beyond 100 px, the collar inside the
+     percent, canceling beyond 100 px, the collar inside the
      exclusion).  With a perfect wing shape, no galaxies and a
      smooth sky the collar is there: it is the sequential
      sky-then-amplitude scheme, not the data.
@@ -709,13 +714,13 @@ template job per detector of the 28 visits, `extracts-{visit}/`).
      650 px.  `broadcal/wing-broadcal-i-pass1.fits`.
    - the amplitude census of pass 1 (29,914 free stars): 3 percent
      negative at every magnitude, star-to-star scatter 25-36
-     percent (the colour term of i-band flux against Gaia G: real,
+     percent (the color term of i-band flux against Gaia G: real,
      expected).  Of the 73 negative bright stars 26 are pairs
      closer than 30 px (the partner at +100), 18 are within 300 px
      of the edge, 3 are G < 6 stars whose wing covers the patch
      (degenerate with the mesh), most of the rest wider pairs with
      merged masks.  Fixed by a Gaussian prior on each amplitude
-     about the prediction with width 0.3 (the colour scatter;
+     about the prediction with width 0.3 (the color scatter;
      `joint.PRIOR_SIGMA`, `--joint-prior`), in the normal matrix's
      units sky_sigma^2 / 0.3^2 (a first version in inverse units
      did nothing): the pairs go to ~1, no negatives, isolated stars
@@ -818,7 +823,7 @@ template job per detector of the 28 visits, `extracts-{visit}/`).
    - the injected stars' model error, +6 to +8 (a ~2 percent high
      amplitude), is the same with both segmentations; still to be
      understood (a bias of the ring-free amplitude toward the
-     neighbours' light, or the pinned faint stars' prediction
+     neighbors' light, or the pinned faint stars' prediction
      being high by the k_stamp / k_in ratio and the free
      amplitudes compensating).
 
@@ -837,7 +842,9 @@ template job per detector of the 28 visits, `extracts-{visit}/`).
    `wing.py` is the wing reader; `forward.py` / `forward_check`
    stay as the account of the trough (the simulation uses the DM
    fit), `run_visit` and `stack` as the visit-level diagnostics.
-   The old pipeline chart is kept as `docs/flow-full-forward.dot`;
+   The old pipeline chart was trimmed to its surviving visit-level
+   part, `docs/flow-forward-model.dot` (2026-09-14; the full chart is
+   in git history before then);
    the earlier run outputs under `~/oh/starsub-visits` still read
    with the stack and comparison scripts.
 
@@ -1063,14 +1070,45 @@ template job per detector of the 28 visits, `extracts-{visit}/`).
    background restored; the redo's noise factor is not in the
    tables (it scales the variance, not the image).
 
-8. **Integration and validation.**  The per-input response is
-   computed once per visit-detector (~40 s on slurm) and stored as a
-   small coarse array; the coadd stage sums stored arrays per cell;
-   lsst-mdet reads the result.  Validate with the dual-state stack on
-   the final images in all bands (only i so far), the injection test
-   above, then metadetection on cleaned patches versus the current
-   product (star-galaxy correlations).  Check DP2 at NERSC with
-   `lsst-starsub-check-datasets`.
+7k. **All star code in lsst-starsub** (2026-09-13).  lsst_mdet/starsub.py
+   moved unchanged into `lsst_starsub.census` (census, mask circles,
+   field segmentation, taper, star table, diffuse mask) and
+   `lsst_starsub.stamps` (the stamp-template route, still the
+   reference); lsst_mdet/gaia.py merged into `lsst_starsub.gaia`; the
+   Gaia maker is now `lsst-starsub-make-gaia` (no lsst-mdet alias).
+   lsst_starsub imports nothing from lsst_mdet (tests/test_independence):
+   it keeps its own DM mask bits (`maskbits`), `SimpleBox`/`ButlerWcs`
+   (`geom`) and a copy of metadetection's detection settings
+   (`joint.DETECT_SETTINGS`), which lsst_mdet overrides by passing its
+   own (`detect_settings`); lsst-mdet's tests/test_starsub_settings
+   checks the copies.  The make-gaia butler defaults (NERSC's dp2) now
+   live in `lsst_starsub.cli.make_gaia` as well as lsst_mdet.defaults.
+   The lsst_mdet meta table gains the joint-fit and faint-wing
+   settings (`joint_*`) and `version_lsst_starsub`.  Verified: 112 of
+   116 moved definitions AST-identical (the 4 differ in docstrings
+   and one import line); 21 reference outputs on 7275/55 identical
+   before and after (process-cells both routes, getimages both
+   routes, make-slurm-nersc, lsst-starsub-visit, visit-template
+   extracts, cell-clean joint and template, the make-gaia file);
+   both test suites pass (lsst-mdet 52, lsst-starsub 42).  Found on
+   the way: `lsst-mdet-getimages --starsub-method joint` fails on the
+   g band, which has no wing file (the reference used r for g).
+
+8. **Integration and validation.**  DONE, not as planned: the
+   stored per-input response and its coadd were replaced by the joint
+   fit, which lsst-mdet runs per patch and band inside the
+   metadetection job (7f, `--starsub-method joint`), with the faint-star
+   wings (G 19-21) subtracted and the cirrus regions masked
+   (run-dp2-test-nearstar-inject, run-dp2-test-cirrus-check,
+   2026-09-12/13).  Validated by the ideal simulation (7b), the object
+   injection tests near cirrus and near faint stars, and the 600-patch
+   runs against the template control (run-dp2-test-joint3/4,
+   2026-09-12/13): shear sample +12 percent, star gamma_t consistent
+   with zero beyond 0.3 arcmin, the source-count excess near G 18-21
+   stars gone.  DP2 at NERSC checked with `lsst-starsub-check-datasets`.
+   Remaining: the +2 percent flux excess just outside the census
+   masks (wing shape or mask edge, not the amplitudes) and the
+   full-footprint run.
 
 Option 2 (pre-subtract on visits and recoadd) is no longer needed as
 a fallback: step 1 showed the trough is removable on the existing

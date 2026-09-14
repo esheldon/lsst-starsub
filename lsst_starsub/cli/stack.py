@@ -17,6 +17,13 @@ G_SLICES = [
 
 
 def get_args():
+    """
+    Parse the command line.
+
+    Returns
+    -------
+    args: argparse.Namespace
+    """
     import argparse
 
     parser = argparse.ArgumentParser()
@@ -47,8 +54,19 @@ def get_args():
 
 def load_profiles(files):
     """
-    the concatenated profiles_dmask tables with a file index,
-    and the common edges
+    Load and concatenate the d - r_mask profile tables of the files.
+
+    Parameters
+    ----------
+    files: list of str
+        lsst-starsub-visit outputs
+
+    Returns
+    -------
+    edges: array
+        The common annulus edges
+    table: structured array
+        The concatenated profiles_dmask tables with a file index
     """
     import rustfits
 
@@ -72,8 +90,20 @@ def load_profiles(files):
 
 def clipped_mean(vals, clip, niter=5):
     """
-    sigma-clipped mean and its error of a 1-d array (NaNs
-    ignored); clip <= 0 disables the clipping
+    Take the sigma-clipped mean of a 1-d array and its error.
+
+    Parameters
+    ----------
+    vals: array
+        NaNs are ignored
+    clip: float
+        The clipping in MAD-scaled sigma; <= 0 disables it
+    niter: int, optional
+
+    Returns
+    -------
+    mean, err: float
+        NaN when fewer than 2 values
     """
     v = vals[np.isfinite(vals)]
     if v.size < 2:
@@ -95,10 +125,32 @@ def clipped_mean(vals, clip, niter=5):
 
 def stack(table, state, glo, ghi, ref='global', clip=3.0):
     """
-    clipped mean, its error, median and count across stars for
-    one state and G slice, in 10^-3 sky sigma, with the profile
-    referenced globally (as stored) or to each star's local
-    level
+    Stack the profiles of one state and G slice across stars.
+
+    In 10^-3 sky sigma, with the profile referenced globally (as
+    stored) or to each star's local level.
+
+    Parameters
+    ----------
+    table: structured array
+        From load_profiles
+    state: str
+    glo, ghi: float
+        The G range [glo, ghi)
+    ref: str, optional
+        'global' or 'local'; local drops the rows without a local
+        level
+    clip: float, optional
+        The sigma clipping of the mean (clipped_mean)
+
+    Returns
+    -------
+    mean, err, med: arrays
+        Per annulus; NaN where fewer than 2 stars
+    count: int array
+        The stars contributing per annulus
+    nstars: int
+        The stars in the slice
     """
     w = (
         (table['state'] == state)
@@ -123,6 +175,9 @@ def stack(table, state, glo, ghi, ref='global', clip=3.0):
 
 
 def main():
+    """
+    Stack the per-star profiles over detectors and plot them.
+    """
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as mplt

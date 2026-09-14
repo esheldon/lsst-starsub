@@ -17,8 +17,15 @@ import numpy as np
 
 
 def get_args():
+    """
+    Parse the command line.
+
+    Returns
+    -------
+    args: argparse.Namespace
+    """
     import argparse
-    from ..visit import VISIT_COLLECTION, VISIT_REPO
+    from . import add_butler_arguments
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--visit', type=int, required=True)
@@ -28,8 +35,7 @@ def get_args():
         help='lsst-starsub-visit output with star_model and gaia_stars',
     )
     parser.add_argument('--outdir', default='.')
-    parser.add_argument('--repo', default=VISIT_REPO)
-    parser.add_argument('--collection', default=VISIT_COLLECTION)
+    add_butler_arguments(parser)
     parser.add_argument('--nstars', type=int, default=3,
                         help='brightest stars to profile')
     parser.add_argument('--rmax', type=float, default=2000)
@@ -37,6 +43,24 @@ def get_args():
 
 
 def annulus_profile(arr, ir, nbin, sel=None):
+    """
+    Take the mean of an image in annuli.
+
+    Parameters
+    ----------
+    arr: array
+    ir: int array
+        The annulus index of each pixel
+    nbin: int
+        The number of annuli
+    sel: bool array, optional
+        Pixels used; all when None
+
+    Returns
+    -------
+    prof: array
+        NaN where an annulus is empty
+    """
     if sel is None:
         sel = np.ones(arr.shape, dtype=bool)
     out = np.full(nbin, np.nan)
@@ -48,13 +72,17 @@ def annulus_profile(arr, ir, nbin, sel=None):
 
 
 def main():
+    """
+    Run the forward-model check of the visit polynomial on one input.
+    """
     import rustfits
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-    from ..coadd import SMOOTH_ORDER, fit_smooth_surface
-    from ..visit import INSTRUMENT, make_visit_butler
-    from .. import forward
+    from ..coadd.cellcoadd import SMOOTH_ORDER, fit_smooth_surface
+    from ..site import INSTRUMENT
+    from ..visit.exposure import make_visit_butler
+    from ..visit import forward
 
     sys.stdout.reconfigure(line_buffering=True)
     args = get_args()
@@ -85,6 +113,7 @@ def main():
     resp = res['response']
 
     def structure(a):
+        """The image minus its smooth surface."""
         return a - fit_smooth_surface(a, SMOOTH_ORDER)
 
     sstruct, fstruct, rstruct = structure(stored), structure(fit0), \
