@@ -17,6 +17,7 @@ lsst-starsub-visit-template = "lsst_starsub.cli.visit_template:main"
 lsst-starsub-make-slurm-template = "lsst_starsub.cli.make_slurm_template:main"
 lsst-starsub-cell-clean = "lsst_starsub.cli.cell_clean:main"
 lsst-starsub-sim = "lsst_starsub.cli.sim:main"
+lsst-starsub-make-gaia = "lsst_starsub.cli.make_gaia:main"
 
 [tool.setuptools.packages.find]
 include = ["lsst_starsub*"]

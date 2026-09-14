@@ -30,15 +30,14 @@ cloud with its model, and the per-detector and per-star records
 """
 import numpy as np
 
-from lsst_mdet.starsub import (
+from .census import build_star_mask, field_segmentation, select_stars
+from .profiles import R_MIN, measure_profiles
+from .stamps import (
     AUR_GMAX, AUR_SLOPE_MAX, AUR_SLOPE_MIN, AUR_SLOPE_SEP, CANON,
-    HALO_SLOPE, TMPL_HALF, TMPL_OUT_MAX, build_star_mask,
-    denoise_template, extend_template_halo, field_segmentation,
-    fit_halo_slope, measure_coadd_fwhm, select_stars,
+    HALO_SLOPE, TMPL_HALF, TMPL_OUT_MAX, denoise_template,
+    extend_template_halo, fit_halo_slope, measure_coadd_fwhm,
     select_template_stars,
 )
-
-from .profiles import R_MIN, measure_profiles
 from .visit import (
     GSUB, WIDE_BW, WIDE_GMAX, build_wide_star_mask, restore_background,
     sky_background,
@@ -70,7 +69,7 @@ def wing_edges():
 def star_stamps(image, good, seg, x, y, sel, halo):
     """
     the individual core-normalized, sub-pixel-aligned template
-    stamps (as lsst_mdet.starsub.stack_star_stamps builds before
+    stamps (as lsst_starsub.stamps.stack_star_stamps builds before
     its median), skipping stars inside the halo zone
 
     Returns
@@ -132,7 +131,7 @@ def extract_detector(vexp, gaia, gsub=GSUB):
     array per star: G, x, y, prof in nJy per unit flux, npix),
     edges
     """
-    from lsst_mdet.gaia import gaia_pixel_positions
+    from .gaia import gaia_pixel_positions
 
     mask0 = vexp.mask.array[:, :, 0]
     x, y = gaia_pixel_positions(gaia, vexp.wcs, vexp.bbox)
@@ -268,7 +267,7 @@ def fit_pooled_aureole(cloud, slope, ln_a, rmin=AUR_RMIN,
         med(r) = k_in [a_in r^slope + b r^s]
 
     The slope scan is bounded AUR_SLOPE_SEP flatter than the
-    inner wing as in lsst_mdet.starsub.fit_aureole
+    inner wing as in lsst_starsub.stamps.fit_aureole
 
     Returns
     -------

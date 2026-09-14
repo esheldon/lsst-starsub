@@ -1,11 +1,12 @@
 """
 The star subtraction of a patch coadd as a library call.
 
-lsst_mdet's pipeline calls handle_stars_joint in place of its own
-lsst_mdet.starsub.handle_stars (option --starsub-method joint); the
-contract is the same, so the two routes can be compared.  The census,
-star masks and output table are lsst_mdet's; the sky and the stars
-are the joint fit of lsst_starsub.joint.
+lsst_mdet's pipeline calls handle_stars_joint in place of the stamp
+templates' handle_stars (lsst_starsub.stamps; option --starsub-method
+joint); the contract is the same, so the two routes can be compared.
+The census, star masks and output table are the shared ones
+(lsst_starsub.census); the sky and the stars are the joint fit of
+lsst_starsub.joint.
 
 The fit is also returned in a form that make_fit_tables turns into
 four small tables for the output file, from which render_fit
@@ -54,7 +55,7 @@ def wing_taper(r, rin=None, rout=None):
     Return the radial taper that keeps a star's wing and drops its core.
 
     A smooth step, 0 inside rin and 1 beyond rout (the cumulative
-    triweight of lsst_mdet.apodize).
+    triweight of lsst_starsub.census.taper_from_distance).
 
     Parameters
     ----------
@@ -67,7 +68,7 @@ def wing_taper(r, rin=None, rout=None):
     -------
     taper: array
     """
-    from lsst_mdet.apodize import taper_from_distance
+    from .census import taper_from_distance
 
     rin = WING_RIN if rin is None else rin
     rout = WING_ROUT if rout is None else rout
@@ -164,7 +165,7 @@ def subtract_faint_wings(image, gaia, x, y, wing, gsub, good=None,
     image: array
         The image, modified in place
     gaia: array with fields
-        The gaia extract (lsst_mdet.gaia), to WING_GMAX
+        The gaia extract (lsst_starsub.gaia), to WING_GMAX
     x, y: arrays
         The stars' patch-frame positions
     wing: WingModel
@@ -242,7 +243,8 @@ def load_wing(fname):
 
 
 def handle_stars_joint(deep_coadd, wcs, gaia, wing, gsub=None,
-                       spacing=None, prior=None, verbose=True):
+                       spacing=None, prior=None, detect_settings=None,
+                       verbose=True):
     """
     Subtract the stars and the sky of a patch coadd with the joint fit.
 
@@ -252,7 +254,7 @@ def handle_stars_joint(deep_coadd, wcs, gaia, wing, gsub=None,
     objects; the mesh then takes the place of the 'object' model.
     The sky mesh and the star model are subtracted in place, and with
     WING_GMAX set the wings of the fainter stars (subtract_faint_wings).
-    Returns what lsst_mdet.starsub.handle_stars returns, plus the fit.
+    Returns what lsst_starsub.stamps.handle_stars returns, plus the fit.
 
     Parameters
     ----------
@@ -262,17 +264,21 @@ def handle_stars_joint(deep_coadd, wcs, gaia, wing, gsub=None,
     wcs: ButlerWcs or FileWcs
         For the gaia pixel positions
     gaia: array with fields
-        The gaia extract (lsst_mdet.gaia)
+        The gaia extract (lsst_starsub.gaia)
     wing: WingModel
         From load_wing
     gsub: float, optional
-        Census depth; default lsst_mdet.starsub.GSUB
+        Census depth; default lsst_starsub.census.GSUB
     spacing: float, optional
         The sky mesh node spacing in pixels; default
         lsst_starsub.joint.SPACING
     prior: float, optional
         The amplitude prior width about the prediction; default
         lsst_starsub.joint.PRIOR_SIGMA
+    detect_settings: dict, optional
+        The detection settings of the fit's source segmentation;
+        lsst_mdet passes metadetection's.  Default
+        lsst_starsub.joint.DETECT_SETTINGS
     verbose: bool, optional
         Print the census and fit summaries
 
@@ -291,12 +297,10 @@ def handle_stars_joint(deep_coadd, wcs, gaia, wing, gsub=None,
         (wing_gmax, wing_rin, wing_rout, wing_core_rap)
     """
     from scipy import ndimage
-    from lsst_mdet.defaults import DM_NO_DATA
-    from lsst_mdet.gaia import gaia_pixel_positions
-    from lsst_mdet.starsub import (
-        GSUB, build_star_mask, make_star_table, select_stars,
-    )
+    from .census import GSUB, build_star_mask, make_star_table, select_stars
+    from .gaia import gaia_pixel_positions
     from .joint import GFIT, PRIOR_SIGMA, SPACING, joint_fit
+    from .maskbits import DM_NO_DATA
 
     if gsub is None:
         gsub = GSUB
@@ -330,7 +334,7 @@ def handle_stars_joint(deep_coadd, wcs, gaia, wing, gsub=None,
     jf = joint_fit(
         image, good, stars, wing, sky_sigma,
         spacing=spacing, prior_sigma=prior, variance=var,
-        verbose=verbose,
+        detect_settings=detect_settings, verbose=verbose,
     )
     image -= jf['sky']
     image -= jf['star_model']
@@ -378,8 +382,8 @@ def make_fit_tables(fits):
     ----------
     fits: dict
         band -> the fit dict from handle_stars_joint; the census
-        must be the same in every band (it is: lsst_mdet's
-        census depends on the gaia extract and the patch alone)
+        must be the same in every band (it is: the census
+        depends on the gaia extract and the patch alone)
 
     Returns
     -------

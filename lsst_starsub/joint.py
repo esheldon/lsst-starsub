@@ -26,6 +26,19 @@ sky-then-amplitude scheme leaves the collar
 """
 import numpy as np
 
+# the source segmentation's detection settings: metadetection's own
+# (lsst_mdet.detect.DETECT_SETTINGS, whose threshold, kernel and minimum
+# area these copy), so the sky fit masks what metadetection will detect.
+# lsst_mdet passes its dict in (detect_settings); a test there checks
+# the copy.  thresh in units of the kernel-scale noise, the gaussian
+# kernel's fwhm in arcsec at pixel_scale arcsec per px, minarea in px
+DETECT_SETTINGS = dict(
+    thresh=0.8,
+    kernel_fwhm=0.8,
+    pixel_scale=0.2,
+    minarea=4,
+)
+
 BIN = 4
 SPACING = 256
 GFIT = 17.0
@@ -92,11 +105,41 @@ PRIOR_SIGMA = 0.3   # the amplitude prior about the prediction (A = 1):
                     # without it, pass 1 of the broad calibration)
 
 
-def deep_segmentation(image, good, sig, grow=SEG_GROW, return_diffuse=False):
+def make_kernel(detect_settings=None):
+    """
+    Make the detection kernel, a 7x7 gaussian of the settings' fwhm.
+
+    As lsst_mdet.detect.make_kernel.
+
+    Parameters
+    ----------
+    detect_settings: dict, optional
+        With kernel_fwhm (arcsec) and pixel_scale (arcsec per px);
+        default DETECT_SETTINGS
+
+    Returns
+    -------
+    kernel: array
+        The 7x7 kernel
+    """
+    import ngmix
+
+    s = DETECT_SETTINGS if detect_settings is None else detect_settings
+    fwhm = s['kernel_fwhm'] / s['pixel_scale']  # pixels
+    T = ngmix.moments.fwhm_to_T(fwhm)
+    kernel_gm = ngmix.GMixModel(
+        pars=[0.0, 0.0, 0.0, 0.0, T, 1.0],
+        model='gauss',
+    )
+    return kernel_gm.make_image([7, 7])
+
+
+def deep_segmentation(image, good, sig, grow=SEG_GROW, return_diffuse=False,
+                      detect_settings=None):
     """
     Segment the sources with the metadetection detection settings.
 
-    The metadetection detection settings (lsst_mdet.detect: the
+    The metadetection detection settings (DETECT_SETTINGS: the
     0.8 arcsec Gaussian kernel, threshold 0.8 in kernel-scale
     noise, minarea 4) as a mask of the sources, grown by `grow`
     px; twice the area of the 1.5 sigma per-pixel segmentation
@@ -118,6 +161,9 @@ def deep_segmentation(image, good, sig, grow=SEG_GROW, return_diffuse=False):
         Px by which the source footprints are grown; default SEG_GROW
     return_diffuse: bool, optional
         Also return the mask of the diffuse segments
+    detect_settings: dict, optional
+        The detection settings, thresh, kernel_fwhm, pixel_scale and
+        minarea; default DETECT_SETTINGS
 
     Returns
     -------
@@ -130,14 +176,15 @@ def deep_segmentation(image, good, sig, grow=SEG_GROW, return_diffuse=False):
     from scipy import ndimage
 
     imf = np.ascontiguousarray(image, dtype='f4')
-    objs, seg = _extract(imf, sig, ~good)
+    objs, seg = _extract(imf, sig, ~good, detect_settings=detect_settings)
     det = seg > 0
     diffuse = diffuse_segments(imf, seg, objs, sig)
     region = np.zeros(det.shape, dtype=bool)
     if diffuse.size:
         region = np.isin(seg, diffuse)
         det &= ~region
-        det |= compact_in_diffuse(imf, good & region, sig)
+        det |= compact_in_diffuse(imf, good & region, sig,
+                                  detect_settings=detect_settings)
         objs = np.delete(objs, diffuse - 1)
         print(f'    {diffuse.size} diffuse segments left to the sky fit '
               f'({region[good].mean() * 100:.1f} percent of the good '
@@ -150,7 +197,7 @@ def deep_segmentation(image, good, sig, grow=SEG_GROW, return_diffuse=False):
     return det
 
 
-def _extract(imf, sig, mask):
+def _extract(imf, sig, mask, detect_settings=None):
     """
     Run sep.extract with the metadetection detection settings.
 
@@ -165,6 +212,9 @@ def _extract(imf, sig, mask):
         The per-pixel sky noise (sep's err)
     mask: bool array
         True for the pixels to ignore
+    detect_settings: dict, optional
+        The detection settings, thresh, kernel_fwhm, pixel_scale and
+        minarea; default DETECT_SETTINGS
 
     Returns
     -------
@@ -174,7 +224,8 @@ def _extract(imf, sig, mask):
         The segmentation map: label k for objs[k - 1], 0 for none
     """
     import sep
-    from lsst_mdet.detect import DETECT_SETTINGS, make_kernel
+
+    s = DETECT_SETTINGS if detect_settings is None else detect_settings
 
     # sep's pixel stack is process-global and touched in full on
     # every extract call (41 bytes per entry: 2e7 entries cost
@@ -190,9 +241,9 @@ def _extract(imf, sig, mask):
             sep.set_extract_pixstack(stack)
             try:
                 return sep.extract(
-                    imf, DETECT_SETTINGS['thresh'], err=sig, mask=mask,
-                    segmentation_map=True, filter_kernel=make_kernel(),
-                    filter_type='conv', minarea=DETECT_SETTINGS['minarea'],
+                    imf, s['thresh'], err=sig, mask=mask,
+                    segmentation_map=True, filter_kernel=make_kernel(s),
+                    filter_type='conv', minarea=s['minarea'],
                     deblend_nthresh=1, deblend_cont=1.0,
                 )
             except Exception as err:
@@ -246,7 +297,7 @@ def diffuse_segments(imf, seg, objs, sig):
     return ids[med < SEG_DIFFUSE_MEDIAN * sig]
 
 
-def compact_in_diffuse(imf, region, sig):
+def compact_in_diffuse(imf, region, sig, detect_settings=None):
     """
     Find the compact sources inside the diffuse segments.
 
@@ -263,6 +314,8 @@ def compact_in_diffuse(imf, region, sig):
         search is limited
     sig: float
         The per-pixel sky noise
+    detect_settings: dict, optional
+        The detection settings; default DETECT_SETTINGS
 
     Returns
     -------
@@ -274,7 +327,7 @@ def compact_in_diffuse(imf, region, sig):
     bkg = sep.Background(imf, mask=~region, bw=SEG_DIFFUSE_BW,
                          bh=SEG_DIFFUSE_BW, fw=3, fh=3)
     resid = np.ascontiguousarray(imf - bkg.back(), dtype='f4')
-    _, seg = _extract(resid, sig, ~region)
+    _, seg = _extract(resid, sig, ~region, detect_settings=detect_settings)
     return seg > 0
 
 
@@ -524,7 +577,7 @@ def star_column(cy, cx, x, y, G, canonical, b=BIN, eps=EPS):
 
 def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
               gfit=GFIT, b=BIN, npass=NPASS, eps=EPS, variance=None,
-              prior_sigma=PRIOR_SIGMA, verbose=True):
+              prior_sigma=PRIOR_SIGMA, detect_settings=None, verbose=True):
     """
     Fit the star amplitudes and the sky mesh together.
 
@@ -569,6 +622,9 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
     prior_sigma: float, optional
         Gaussian prior on each free amplitude about 1, in the
         cells' chi2 units; None for none.  Default PRIOR_SIGMA
+    detect_settings: dict, optional
+        The detection settings of the source segmentation
+        (deep_segmentation); default DETECT_SETTINGS
     verbose: bool, optional
         Print the per-pass summaries
 
@@ -695,8 +751,10 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
             image.shape, stars, canonical, gsub=99.0, amps=A, verbose=False,
         )
         np.subtract(image, resid, out=resid)
-        seg_excl, diffuse = deep_segmentation(resid, good, sky_sigma,
-                                              return_diffuse=True)
+        seg_excl, diffuse = deep_segmentation(
+            resid, good, sky_sigma, return_diffuse=True,
+            detect_settings=detect_settings,
+        )
         del resid
         if verbose:
             print(f'    segmentation excludes {seg_excl[good].mean() * 100:.1f} '

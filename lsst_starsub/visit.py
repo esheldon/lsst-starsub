@@ -1,7 +1,7 @@
 """
 star and background handling on the visit images
 
-The coadd route (lsst_mdet.starsub.handle_stars) works on images
+The coadd route (lsst_starsub.stamps.handle_stars) works on images
 whose visit-level backgrounds cannot be undone: the coadd inputs
 had a 32 px box background subtracted before warping, and that
 pass absorbs the bright-star wings.  Restoring the coadd's own
@@ -34,7 +34,7 @@ stored and the raw sky image is recoverable exactly:
 so the star wings and the sky can be characterized together on
 the restored image with a background model that stays out of
 the wings by construction.  The subtraction machinery is the
-coadd one (lsst_mdet.starsub), applied to an adapter presenting
+coadd one (lsst_starsub.stamps), applied to an adapter presenting
 the deep_coadd interface it expects; only the restoration and
 the sky model differ.
 
@@ -50,13 +50,15 @@ are plain numpy
 """
 import numpy as np
 
-from lsst_mdet.defaults import DM_INTRP, DM_NO_DATA, DM_SAT
-from lsst_mdet.patchfiles import SimpleBox
-from lsst_mdet.starsub import (
-    APOD_STARS, GSUB, PRE_BW, PRE_GROW, TMPL_OUT_MAX,
-    build_star_mask, circle_radius, field_segmentation,
-    make_star_table, measure_coadd_fwhm, select_stars,
-    subtract_stars, template_out_half,
+from .census import (
+    APOD_STARS, GSUB, build_star_mask, circle_radius, field_segmentation,
+    make_star_table, select_stars,
+)
+from .geom import SimpleBox
+from .maskbits import DM_INTRP, DM_NO_DATA, DM_SAT
+from .stamps import (
+    PRE_BW, PRE_GROW, TMPL_OUT_MAX, measure_coadd_fwhm, subtract_stars,
+    template_out_half,
 )
 
 # the weekly reprocessing runs carry the shapelets IQ score in
@@ -75,7 +77,7 @@ IQ_TIERS = [
 ]
 
 # afw mask planes mapped onto the coadd mask convention the
-# starsub code reads (lsst_mdet.defaults.DM_*).  Planes not
+# starsub code reads (lsst_starsub.maskbits.DM_*).  Planes not
 # listed pass through as clear: DETECTED (we segment ourselves),
 # SUSPECT (near full well, still star light), SPIKE (diffraction
 # spikes: star light we want in the fit, not holes)
@@ -410,12 +412,12 @@ def handle_stars_visit(vexp, gaia, gsub=GSUB, restore='initial',
     grow_bright: float, optional
         When set, the PRE_BW sky passes (round 2 on, and the final
         one) also exclude this many pixels beyond the masks of the
-        stars brighter than RESTORE_GMAX, as the lsst_mdet coadd
-        route does (PRE_GROW_BRIGHT); without it the 64 px boxes
+        stars brighter than RESTORE_GMAX, as the stamp-template
+        coadd route does (PRE_GROW_BRIGHT); without it the 64 px boxes
         sit 12 px from every mask and follow the bright stars'
         wings and any trough beyond that
     star_model: str, optional
-        'template': lsst_mdet's own, built from the image's stamps
+        'template': the stamp route's, built from the image's stamps
         with per-star anchor-ring amplitudes; 'canonical': the
         canonical wing (nJy per unit Gaia flux, from the visit
         templates) rendered as a pure prediction, no per-star
@@ -441,7 +443,7 @@ def handle_stars_visit(vexp, gaia, gsub=GSUB, restore='initial',
         delivered (the image as delivered, copy)
     """
     from scipy import ndimage
-    from lsst_mdet.gaia import gaia_pixel_positions
+    from .gaia import gaia_pixel_positions
 
     delivered = vexp.image.array.copy()
     mask0 = vexp.mask.array[:, :, 0]
@@ -454,7 +456,7 @@ def handle_stars_visit(vexp, gaia, gsub=GSUB, restore='initial',
     # bright-star masks plus grow_bright when asked for
     fine_excl = dstar < PRE_GROW
     if grow_bright is not None:
-        from lsst_mdet.starsub import RESTORE_GMAX
+        from .stamps import RESTORE_GMAX
         bright = stars[stars['G'] < RESTORE_GMAX]
         if bright.size > 0:
             bsm, _ = build_star_mask(bright, mask0, verbose=False)
@@ -669,7 +671,7 @@ def load_visit_exposure(butler, visit, detector, rng=None):
     rng: numpy Generator, optional
         For the noise realization
     """
-    from lsst_mdet.wcs import ButlerWcs
+    from .geom import ButlerWcs
 
     did = dict(instrument=INSTRUMENT, visit=int(visit),
                detector=int(detector))
@@ -775,9 +777,9 @@ def load_visit_exposure(butler, visit, detector, rng=None):
 def load_gaia_for_exposure(vexp, gaia_file=None, gmax=None):
     """
     the gaia extract covering the detector, from a file
-    (lsst_mdet.gaia.read_gaia_file layout) or the TAP query
+    (lsst_starsub.gaia.read_gaia_file layout) or the TAP query
     """
-    from lsst_mdet.gaia import GMAX, fetch_gaia, read_gaia_file
+    from .gaia import GMAX, fetch_gaia, read_gaia_file
 
     if gmax is None:
         gmax = GMAX

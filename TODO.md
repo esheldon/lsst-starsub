@@ -1063,6 +1063,30 @@ template job per detector of the 28 visits, `extracts-{visit}/`).
    background restored; the redo's noise factor is not in the
    tables (it scales the variance, not the image).
 
+7k. **All star code in lsst-starsub** (2026-09-13).  lsst_mdet/starsub.py
+   moved unchanged into `lsst_starsub.census` (census, mask circles,
+   field segmentation, taper, star table, diffuse mask) and
+   `lsst_starsub.stamps` (the stamp-template route, still the
+   reference); lsst_mdet/gaia.py merged into `lsst_starsub.gaia`; the
+   Gaia maker is now `lsst-starsub-make-gaia` (no lsst-mdet alias).
+   lsst_starsub imports nothing from lsst_mdet (tests/test_independence):
+   it keeps its own DM mask bits (`maskbits`), `SimpleBox`/`ButlerWcs`
+   (`geom`) and a copy of metadetection's detection settings
+   (`joint.DETECT_SETTINGS`), which lsst_mdet overrides by passing its
+   own (`detect_settings`); lsst-mdet's tests/test_starsub_settings
+   checks the copies.  The make-gaia butler defaults (NERSC's dp2) now
+   live in `lsst_starsub.cli.make_gaia` as well as lsst_mdet.defaults.
+   The lsst_mdet meta table gains the joint-fit and faint-wing
+   settings (`joint_*`) and `version_lsst_starsub`.  Verified: 112 of
+   116 moved definitions AST-identical (the 4 differ in docstrings
+   and one import line); 21 reference outputs on 7275/55 identical
+   before and after (process-cells both routes, getimages both
+   routes, make-slurm-nersc, lsst-starsub-visit, visit-template
+   extracts, cell-clean joint and template, the make-gaia file);
+   both test suites pass (lsst-mdet 52, lsst-starsub 42).  Found on
+   the way: `lsst-mdet-getimages --starsub-method joint` fails on the
+   g band, which has no wing file (the reference used r for g).
+
 8. **Integration and validation.**  The per-input response is
    computed once per visit-detector (~40 s on slurm) and stored as a
    small coarse array; the coadd stage sums stored arrays per cell;

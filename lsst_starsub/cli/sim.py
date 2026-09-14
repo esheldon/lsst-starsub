@@ -25,7 +25,7 @@ def get_args():
     import argparse
     from ..sim import DEFAULTS
     from ..visit import VISIT_COLLECTION, VISIT_REPO
-    from lsst_mdet.starsub import GSUB
+    from ..census import GSUB
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--tract', type=int, default=7275)
@@ -67,8 +67,7 @@ def sim_geometry(butler, tract, patch, margin=150):
 
     The tract wcs and the cell-coadd-sized patch box
     """
-    from lsst_mdet.patchfiles import SimpleBox
-    from lsst_mdet.wcs import ButlerWcs
+    from ..geom import ButlerWcs, SimpleBox
     from ..visit import SKYMAP
 
     skymap = butler.get('skyMap', skymap=SKYMAP)
@@ -117,8 +116,8 @@ def main():
     """
     Simulate a patch and clean it.
     """
-    from lsst_mdet.defaults import DM_SAT
-    from lsst_mdet.gaia import GMAX, gaia_pixel_positions, read_gaia_file
+    from ..gaia import GMAX, gaia_pixel_positions, read_gaia_file
+    from ..maskbits import DM_SAT
     from ..clean import clean_stem, clean_tag, run_clean, write_clean_file
     from ..profiles import ambient_levels, measure_profiles
     from ..sim import DEFAULTS, simulate_coadd

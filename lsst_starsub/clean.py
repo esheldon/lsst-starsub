@@ -41,8 +41,8 @@ def run_clean(vexp, gaia, tbox, state_name, gsub, nround, grow_bright,
     dict with res, states, seg, ambient, edges, ptable, dedges,
     dtable, star_table, sky_sigma
     """
-    from lsst_mdet.patchfiles import SimpleBox
-    from lsst_mdet.starsub import field_segmentation
+    from .census import field_segmentation
+    from .geom import SimpleBox
     from .profiles import ambient_levels, measure_profiles
     from .visit import build_wide_star_mask, handle_stars_visit
 

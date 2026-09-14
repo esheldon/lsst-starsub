@@ -18,7 +18,7 @@ import numpy as np
 def get_args():
     import argparse
     from ..visit import VISIT_COLLECTION, VISIT_REPO
-    from lsst_mdet.starsub import GSUB
+    from ..census import GSUB
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--tract', type=int, required=True)
@@ -73,7 +73,7 @@ def output_name(outdir, tract, patch, band, visit, detector, ext):
 
 
 def process_one(butler, visit, detector, args, iq_score=np.nan):
-    from lsst_mdet.starsub import field_segmentation
+    from ..census import field_segmentation
     from ..profiles import ambient_levels, measure_profiles
     from ..visit import (
         build_wide_star_mask, handle_stars_visit, iq_tier,

@@ -6,7 +6,7 @@ machinery on a synthetic detector
 import numpy as np
 import pytest
 
-from lsst_mdet.defaults import DM_INTRP, DM_NO_DATA, DM_SAT
+from lsst_starsub.maskbits import DM_INTRP, DM_NO_DATA, DM_SAT
 from lsst_starsub.visit import (
     VisitExposure, build_wide_star_mask, convert_mask, iq_tier,
     restore_background, sky_background, star_model_image,

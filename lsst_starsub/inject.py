@@ -68,7 +68,7 @@ def draw_positions(rng, plan, dstar, shape):
     -------
     x, y (int arrays), G
     """
-    from lsst_mdet.starsub import circle_radius
+    from .census import circle_radius
 
     ny, nx = shape
     clear = dstar > CENTER_CLEAR

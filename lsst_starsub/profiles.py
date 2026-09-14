@@ -12,7 +12,7 @@ the stack, additionally normalized by 10^(-0.4 G)
 """
 import numpy as np
 
-from lsst_mdet.starsub import APOD_STARS, circle_radius
+from .census import APOD_STARS, circle_radius
 
 # log-spaced annuli from just outside the mask floor to beyond
 # the template extents; radii are from the star center
@@ -114,7 +114,7 @@ def exclusion_radius(gmag, wide):
     reference's exclusion, or its mask circle plus the taper
     """
     from .visit import WIDE_GMAX, WIDE_GROW
-    from lsst_mdet.starsub import TMPL_OUT_MAX, template_out_half
+    from .stamps import TMPL_OUT_MAX, template_out_half
 
     if wide:
         if gmag < WIDE_GMAX:

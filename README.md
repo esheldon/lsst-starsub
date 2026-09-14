@@ -15,11 +15,13 @@ verified.
 
     pip install -e .
 
-Requires `lsst_mdet` (from source, `~/git/lsst-mdet`) for the
-star census, template and amplitude machinery, and the LSST
-science pipelines for the butler loaders and the command line.
-The characterization and profile code, and the tests, run
-without the stack.
+Self-contained: the star census and masks (`lsst_starsub.census`),
+the stamp-template subtraction (`lsst_starsub.stamps`), the joint
+star-and-sky fit and the Gaia files all live here, and nothing is
+imported from `lsst_mdet`, which calls this package for both of its
+star routes.  The LSST science pipelines are needed for the butler
+loaders and the command line; the characterization and profile
+code, and the tests, run without the stack.
 
 ## Command line
 
@@ -44,9 +46,16 @@ without the stack.
   writes S3DF slurm jobs (8 detectors per job, 8 GB, one core;
   the milano default per-core share is below the 2.7 GB peak
   with margin, so the memory request matters).  Use a per-tract
-  Gaia file from `lsst-mdet-make-gaia` (refcat collection
+  Gaia file from `lsst-starsub-make-gaia` (refcat collection
   `refcats/DM-39298/gaia_dr3_20230707`) rather than the TAP
   service, which rate-limits.
+- `lsst-starsub-make-gaia --tracts T ... --outdir D` writes the
+  per-tract Gaia DR3 files, `gaia-dr3-{tract:05d}.fits`, from the
+  DM reference catalog in the butler, to G < 21; both star routes
+  and lsst_mdet's `--gaia-pattern` read them.  The defaults are
+  NERSC's DP2 repo; at USDF pass `--repo dp2_prep --collections
+  LSSTCam/runs/DRP/w_2026_32/DM-55677 --refcat-collection
+  refcats/DM-39298/gaia_dr3_20230707`.
 
 Per detector it writes a FITS file with the image states
 (`delivered`, `warp` = delivered with the visit-level sky
