@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 import lsst_starsub.stamps as ss
+from lsst_starsub.census import select_stars
 from lsst_starsub.stamps import (
     AUR_BREAK,
     AUR_MIN_STARS,
@@ -109,7 +110,7 @@ def test_mask_only_fallback():
     var = np.ones(SHAPE)
     mask0 = np.zeros(SHAPE, dtype='i4')
 
-    stars = ss.select_stars(gaia, x, y, mask0)
+    stars = select_stars(gaia, x, y, mask0)
     assert stars.size == 3
     starmask, comps = ss.build_star_mask(stars, mask0)
     assert starmask.any()
@@ -419,7 +420,7 @@ def test_canonical_sparse_route():
     good = np.ones(SHAPE, dtype=bool)
     seg = np.zeros(SHAPE, dtype='i4')
     mask0 = np.zeros(SHAPE, dtype='i4')
-    stars = ss.select_stars(gaia, x, y, mask0)
+    stars = select_stars(gaia, x, y, mask0)
 
     big = ss.build_template(
         image, good, seg, gaia, x, y, stars,
@@ -446,7 +447,7 @@ def test_canonical_needs_min_stamps():
     image = rng.normal(size=SHAPE)
     good = np.ones(SHAPE, dtype=bool)
     seg = np.zeros(SHAPE, dtype='i4')
-    stars = ss.select_stars(gaia, x, y, np.zeros(SHAPE, 'i4'))
+    stars = select_stars(gaia, x, y, np.zeros(SHAPE, 'i4'))
     with pytest.raises(RuntimeError):
         ss.build_template(
             image, good, seg, gaia, x, y, stars,

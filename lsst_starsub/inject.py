@@ -24,6 +24,8 @@ inside the patch for the anchor ring
 """
 import numpy as np
 
+from .wing import profile_of
+
 CORE_R = 6.0          # stamp core normalization radius (template.py)
 BLEND_R0 = 8.0
 BLEND_R1 = 12.0
@@ -124,7 +126,7 @@ def core_factor(psf, canonical):
     The factor scaling the unit-sum psf so its sum within CORE_R
     equals the canonical wing's
     """
-    r, T = canonical
+    r, T = profile_of(canonical)
     c = (psf.shape[0] - 1) // 2
     gy, gx = np.mgrid[0:psf.shape[0], 0:psf.shape[1]]
     rr = np.hypot(gy - c, gx - c)
@@ -154,7 +156,7 @@ def render_injected(shape, x, y, G, canonical, cube, origin, cell_size,
     wing_scale: float
     """
     ny, nx = shape
-    r, T = canonical
+    r, T = profile_of(canonical)
     image = np.zeros((ny, nx), dtype='f8')
     npsf = cube.shape[-1]
     hp = (npsf - 1) // 2

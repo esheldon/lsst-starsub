@@ -22,9 +22,8 @@ from .census import (
     field_segmentation,
     make_star_table,
     own_component_ids,
-    select_stars,
+    patch_census,
 )
-from .gaia import gaia_pixel_positions
 from .maskbits import DM_OUT
 
 
@@ -1600,13 +1599,9 @@ def handle_stars(
     from scipy import ndimage
 
     mask0 = deep_coadd.mask.array[:, :, 0]
-
-    x, y = gaia_pixel_positions(gaia, wcs, deep_coadd.bbox)
-
-    stars = select_stars(gaia, x, y, mask0, gsub=gsub)
-    starmask, comps = build_star_mask(stars, mask0, coadd=True)
-
-    dstar = ndimage.distance_transform_edt(~starmask)
+    stars, starmask, comps, dstar, x, y = patch_census(
+        gaia, wcs, deep_coadd.bbox, mask0, gsub=gsub, coadd=True,
+    )
 
     star_table = None
     if subtract:

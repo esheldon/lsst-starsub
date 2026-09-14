@@ -56,7 +56,7 @@ from ..census import (
     circle_radius,
     field_segmentation,
     make_star_table,
-    select_stars,
+    patch_census,
 )
 from ..geom import SimpleBox
 from ..maskbits import DM_INTRP, DM_NO_DATA, DM_SAT
@@ -428,15 +428,12 @@ def handle_stars_visit(vexp, gaia, gsub=GSUB, restore='initial',
         delivered (the image as delivered, copy)
     """
     from scipy import ndimage
-    from ..gaia import gaia_pixel_positions
 
     delivered = vexp.image.array.copy()
     mask0 = vexp.mask.array[:, :, 0]
-
-    x, y = gaia_pixel_positions(gaia, vexp.wcs, vexp.bbox)
-    stars = select_stars(gaia, x, y, mask0, gsub=gsub)
-    starmask, comps = build_star_mask(stars, mask0)
-    dstar = ndimage.distance_transform_edt(~starmask)
+    stars, starmask, comps, dstar, x, y = patch_census(
+        gaia, vexp.wcs, vexp.bbox, mask0, gsub=gsub,
+    )
     # the fine-pass exclusion: every mask plus PRE_GROW, and the
     # bright-star masks plus grow_bright when asked for
     fine_excl = dstar < PRE_GROW

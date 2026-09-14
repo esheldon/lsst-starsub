@@ -17,7 +17,7 @@ import numpy as np
 
 def get_args():
     import argparse
-    from ..site import VISIT_COLLECTION, VISIT_REPO
+    from . import add_butler_arguments
     from ..census import GSUB
 
     parser = argparse.ArgumentParser()
@@ -25,8 +25,7 @@ def get_args():
     parser.add_argument('--patch', type=int, required=True)
     parser.add_argument('--band', default='i')
     parser.add_argument('--outdir', required=True)
-    parser.add_argument('--repo', default=VISIT_REPO)
-    parser.add_argument('--collection', default=VISIT_COLLECTION)
+    add_butler_arguments(parser)
     parser.add_argument(
         '--nbest', type=int, default=1,
         help='process this many coadd inputs, best IQ first',

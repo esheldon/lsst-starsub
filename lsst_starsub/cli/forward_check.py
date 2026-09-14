@@ -18,7 +18,7 @@ import numpy as np
 
 def get_args():
     import argparse
-    from ..site import VISIT_COLLECTION, VISIT_REPO
+    from . import add_butler_arguments
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--visit', type=int, required=True)
@@ -28,8 +28,7 @@ def get_args():
         help='lsst-starsub-visit output with star_model and gaia_stars',
     )
     parser.add_argument('--outdir', default='.')
-    parser.add_argument('--repo', default=VISIT_REPO)
-    parser.add_argument('--collection', default=VISIT_COLLECTION)
+    add_butler_arguments(parser)
     parser.add_argument('--nstars', type=int, default=3,
                         help='brightest stars to profile')
     parser.add_argument('--rmax', type=float, default=2000)

@@ -78,7 +78,7 @@ def circle_radius(gmag):
     )
 
 
-def select_stars(gaia, x, y, mask0, gsub=GSUB):
+def select_stars(gaia, x, y, mask0, gsub=GSUB, verbose=True):
     """
     Select on-patch stars that are saturated or brighter than gsub
 
@@ -100,6 +100,8 @@ def select_stars(gaia, x, y, mask0, gsub=GSUB):
     gsub: float, optional
         Census depth: unsaturated on-patch stars brighter than
         this are included
+    verbose: bool, optional
+        Print the census counts
 
     Returns
     -------
@@ -148,13 +150,53 @@ def select_stars(gaia, x, y, mask0, gsub=GSUB):
 
     non = int(stars['on_image'].sum())
 
-    print(
-        f'    census: {non} on-patch '
-        f'({int(stars["is_sat"].sum())} saturated) + '
-        f'{len(stars) - non} off-patch intruders'
-    )
+    if verbose:
+        print(
+            f'    census: {non} on-patch '
+            f'({int(stars["is_sat"].sum())} saturated) + '
+            f'{len(stars) - non} off-patch intruders'
+        )
 
     return stars
+
+
+def patch_census(gaia, wcs, bbox, mask0, gsub=GSUB, coadd=False, verbose=True):
+    """
+    Make the census and its masks for one image, the routes' preamble.
+
+    Parameters
+    ----------
+    gaia: array with fields
+        The gaia extract (lsst_starsub.gaia)
+    wcs: ButlerWcs or FileWcs
+        For the pixel positions
+    bbox: box
+        The image's bounding box
+    mask0: array
+        The DM mask plane
+    gsub: float, optional
+        Census depth
+    coadd: bool, optional
+        See build_star_mask
+    verbose: bool, optional
+        Print the census and masked fraction
+
+    Returns
+    -------
+    stars, starmask, comps, dstar, x, y:
+        The census (select_stars), the bool star mask and the labeled
+        component image (build_star_mask), the distance transform off
+        the mask, and every gaia star's pixel position
+    """
+    from scipy import ndimage
+    from .gaia import gaia_pixel_positions
+
+    x, y = gaia_pixel_positions(gaia, wcs, bbox)
+    stars = select_stars(gaia, x, y, mask0, gsub=gsub, verbose=verbose)
+    starmask, comps = build_star_mask(stars, mask0, verbose=verbose,
+                                      coadd=coadd)
+    dstar = ndimage.distance_transform_edt(~starmask)
+    return stars, starmask, comps, dstar, x, y
 
 
 def _get_select_stars_dtype():
@@ -300,51 +342,77 @@ def field_segmentation(image, good, sig):
     -------
     the segmentation map (0 = sky)
     """
+    imf = np.ascontiguousarray(image, dtype='f4')
+    _, seg = sep_extract(imf, 1.5, sig, ~good, retry_deblend=True)
+    return seg
+
+
+def sep_extract(imf, thresh, err, mask, retry_deblend=False, **kwargs):
+    """
+    Run sep.extract with the pixel stack managed.
+
+    sep's pixel stack is process-global and touched in full on every
+    extract call (41 bytes per entry: 2e7 entries cost 0.8 GB, and
+    every later sep call in the process paid it, the per-cell
+    detections included).  The stack starts at SEG_PIXSTACK, grows by
+    4 on overflow up to SEG_PIXSTACK_MAX, and the previous settings
+    are put back.
+
+    Parameters
+    ----------
+    imf: array
+        The image, contiguous float32
+    thresh: float
+        The detection threshold, in units of err
+    err: float or array
+        The pixel noise
+    mask: bool array
+        True for the pixels to ignore
+    retry_deblend: bool, optional
+        On a deblending overflow (a very bright star's wing above
+        threshold exceeding the sub-object limit, seen on visit
+        images) retry with a single deblend threshold, no
+        sub-objects; for callers that only need the segmentation
+    **kwargs:
+        Passed to sep.extract (filter_kernel, minarea, the deblend
+        settings, ...)
+
+    Returns
+    -------
+    objs, seg: structured array, int array
+        The object table and the segmentation map (label k for
+        objs[k - 1], 0 for none)
+    """
     import sep
 
-    imf = np.ascontiguousarray(image, dtype='f4')
-
-    # sep's pixel stack is process-global and touched in full on
-    # every extract call (41 bytes per entry; the former fixed
-    # 1.2e7 cost 0.5 GB here and on every later sep call in the
-    # process, the per-cell detections included).  Start small,
-    # grow on overflow, and put the previous settings back
     old_stack = sep.get_extract_pixstack()
     old_sub = sep.get_sub_object_limit()
     stack = SEG_PIXSTACK
-    deblend = {}
     try:
         sep.set_sub_object_limit(10240)
         while True:
             sep.set_extract_pixstack(stack)
             try:
-                _, seg = sep.extract(
-                    imf, 1.5, err=sig, mask=~good, segmentation_map=True,
-                    **deblend,
+                return sep.extract(
+                    imf, thresh, err=err, mask=mask, segmentation_map=True,
+                    **kwargs,
                 )
-                break
-            except Exception as err:
-                msg = str(err)
+            except Exception as error:
+                msg = str(error)
                 if 'pixel buffer full' in msg and stack < SEG_PIXSTACK_MAX:
                     stack *= 4
                     print(f'    segmentation pixel stack full; '
                           f'retrying with {stack}')
-                elif 'deblending overflow' in msg and not deblend:
-                    # a very bright star's wing above threshold can
-                    # exceed the sub-object limit (seen on visit
-                    # images).  The map only masks neighbors, so
-                    # deblending is not needed: retry with a single
-                    # deblend threshold (no sub-objects)
+                elif ('deblending overflow' in msg and retry_deblend
+                      and kwargs.get('deblend_nthresh') != 1):
                     print('    segmentation deblending overflow; '
                           'retrying without deblending')
-                    deblend = dict(deblend_nthresh=1, deblend_cont=1.0)
+                    kwargs = dict(kwargs, deblend_nthresh=1, deblend_cont=1.0)
                 else:
                     raise
     finally:
         sep.set_extract_pixstack(old_stack)
         sep.set_sub_object_limit(old_sub)
-
-    return seg
 
 
 def make_star_table(stars, slist):

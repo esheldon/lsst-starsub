@@ -18,7 +18,7 @@ _WORKER = {}
 
 def get_args():
     import argparse
-    from ..site import VISIT_COLLECTION, VISIT_REPO
+    from . import add_butler_arguments
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--visit', type=int, required=True)
@@ -33,8 +33,7 @@ def get_args():
     )
     parser.add_argument('--gaia-dir', required=True)
     parser.add_argument('--outdir', required=True)
-    parser.add_argument('--repo', default=VISIT_REPO)
-    parser.add_argument('--collection', default=VISIT_COLLECTION)
+    add_butler_arguments(parser)
     parser.add_argument('--nproc', type=int, default=1)
     parser.add_argument(
         '--save-extracts', action='store_true',

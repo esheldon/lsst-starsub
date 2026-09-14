@@ -273,9 +273,7 @@ def handle_stars_joint(deep_coadd, wcs, gaia, wing, gsub=None,
         whose wings were subtracted, and the settings of that step
         (wing_gmax, wing_rin, wing_rout, wing_core_rap)
     """
-    from scipy import ndimage
-    from ..census import GSUB, build_star_mask, make_star_table, select_stars
-    from ..gaia import gaia_pixel_positions
+    from ..census import GSUB, make_star_table, patch_census
     from ..joint import GFIT, PRIOR_SIGMA, SPACING, joint_fit
     from ..maskbits import DM_NO_DATA
 
@@ -287,11 +285,10 @@ def handle_stars_joint(deep_coadd, wcs, gaia, wing, gsub=None,
         prior = PRIOR_SIGMA
 
     mask0 = deep_coadd.mask.array[:, :, 0]
-    x, y = gaia_pixel_positions(gaia, wcs, deep_coadd.bbox)
-    stars = select_stars(gaia, x, y, mask0, gsub=gsub)
-    starmask, _ = build_star_mask(stars, mask0, verbose=verbose,
-                                  coadd=True)
-    dstar = ndimage.distance_transform_edt(~starmask)
+    stars, starmask, _, dstar, x, y = patch_census(
+        gaia, wcs, deep_coadd.bbox, mask0, gsub=gsub, coadd=True,
+        verbose=verbose,
+    )
 
     apply = getattr(deep_coadd, 'apply_background', None)
     if apply is not None:
@@ -374,6 +371,8 @@ def make_fit_tables(fits):
     row per mesh node per band) and WING_EXT (one row per radius
     per band of the wing profile, nJy per unit Gaia flux)
     """
+    from ..wing import profile_of
+
     bands = list(fits.keys())
     first = fits[bands[0]]
     stars = first['stars']
@@ -439,7 +438,7 @@ def make_fit_tables(fits):
         ).ravel()
         sky_rows.append(sky)
 
-        r, T = fit['wing']
+        r, T = profile_of(fit['wing'])
         wing = np.zeros(r.size, dtype=[
             ('band', 'U1'), ('r', 'f4'), ('T', 'f4'),
         ])
@@ -521,7 +520,7 @@ def render_fit(tables, band):
 
     stars = tables[STARS_EXT]
     star_model = render_canonical_stars(
-        shape, stars, wing, gsub=99.0, amps=stars[f'A_{band}'],
+        shape, stars, wing, amps=stars[f'A_{band}'],
         verbose=False,
     )
     return sky, star_model

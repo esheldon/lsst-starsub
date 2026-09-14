@@ -8,14 +8,13 @@ the cell coadd the visit_summary and the stored visit background
 
 def get_args():
     import argparse
-    from ..site import VISIT_COLLECTION, VISIT_REPO
+    from . import add_butler_arguments
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--tract', type=int, required=True)
     parser.add_argument('--patch', type=int, required=True)
     parser.add_argument('--band', default='i')
-    parser.add_argument('--repo', default=VISIT_REPO)
-    parser.add_argument('--collection', default=VISIT_COLLECTION)
+    add_butler_arguments(parser)
     return parser.parse_args()
 
 

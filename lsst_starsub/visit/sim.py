@@ -22,6 +22,8 @@ clipped and flagged SAT.
 """
 import numpy as np
 
+from ..wing import profile_of
+
 from ..inject import BLEND_R0, BLEND_R1, CORE_R
 
 DEFAULTS = dict(
@@ -71,7 +73,7 @@ def core_factor_gaussian(sigma, canonical):
     The flux of a unit Gaussian core within CORE_R, and the
     canonical wing's, so the core can be scaled to match
     """
-    r, T = canonical
+    r, T = profile_of(canonical)
     m = int(np.ceil(CORE_R)) + 1
     gy, gx = np.mgrid[-m:m + 1, -m:m + 1]
     rr = np.hypot(gy, gx)
@@ -98,7 +100,7 @@ def render_stars(shape, x, y, G, amp, canonical, fwhm_px, eps=DEFAULTS['eps'],
         The visit PSF FWHM in pixels
     """
     ny, nx = shape
-    r, T = canonical
+    r, T = profile_of(canonical)
     sigma = fwhm_px / 2.3548
     C = core_factor_gaussian(sigma, canonical)
     image = np.zeros((ny, nx), dtype='f8')

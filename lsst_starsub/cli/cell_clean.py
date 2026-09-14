@@ -41,7 +41,7 @@ def get_args():
     Parse the command line.
     """
     import argparse
-    from ..site import VISIT_COLLECTION, VISIT_REPO
+    from . import add_butler_arguments
     from ..census import GSUB
 
     parser = argparse.ArgumentParser()
@@ -52,8 +52,7 @@ def get_args():
     parser.add_argument('--canonical', required=True,
                         help='the wing file (lsst_starsub.wing)')
     parser.add_argument('--outdir', required=True)
-    parser.add_argument('--repo', default=VISIT_REPO)
-    parser.add_argument('--collection', default=VISIT_COLLECTION)
+    add_butler_arguments(parser)
     parser.add_argument('--gsub', type=float, default=GSUB)
     parser.add_argument('--star-model', default='joint',
                         choices=['joint', 'template', 'canonical'])

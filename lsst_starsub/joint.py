@@ -94,8 +94,6 @@ MESH_SMOOTH_DELTA = 0.1
 SEG_DIFFUSE_MEDIAN = 1.6
 SEG_DIFFUSE_BW = 32   # px
 RENDER_BLOCK = 256  # rows per block when rendering the mesh
-PIXSTACK = int(2e6)      # sep's pixel stack for the segmentation, entries
-PIXSTACK_MAX = int(3.2e7)  # grown by 4 on overflow up to this
 PRIOR_SIGMA = 0.3   # the amplitude prior about the prediction (A = 1):
                     # the colour scatter of the i-band to Gaia G flux
                     # ratio; isolated stars are constrained 10x better
@@ -201,8 +199,7 @@ def _extract(imf, sig, mask, detect_settings=None):
     """
     Run sep.extract with the metadetection detection settings.
 
-    No deblending.  The pixel stack starts at PIXSTACK and grows by 4
-    on overflow up to PIXSTACK_MAX.
+    No deblending; the pixel stack is managed by census.sep_extract.
 
     Parameters
     ----------
@@ -223,39 +220,14 @@ def _extract(imf, sig, mask, detect_settings=None):
     seg: int array
         The segmentation map: label k for objs[k - 1], 0 for none
     """
-    import sep
+    from .census import sep_extract
 
     s = DETECT_SETTINGS if detect_settings is None else detect_settings
-
-    # sep's pixel stack is process-global and touched in full on
-    # every extract call (41 bytes per entry: 2e7 entries cost
-    # 0.8 GB, and every later sep call in the process paid it, the
-    # per-cell detections included).  Start small, grow on
-    # overflow, and put the previous settings back
-    old_stack = sep.get_extract_pixstack()
-    old_sub = sep.get_sub_object_limit()
-    stack = PIXSTACK
-    try:
-        sep.set_sub_object_limit(10240)
-        while True:
-            sep.set_extract_pixstack(stack)
-            try:
-                return sep.extract(
-                    imf, s['thresh'], err=sig, mask=mask,
-                    segmentation_map=True, filter_kernel=make_kernel(s),
-                    filter_type='conv', minarea=s['minarea'],
-                    deblend_nthresh=1, deblend_cont=1.0,
-                )
-            except Exception as err:
-                if 'pixel buffer full' not in str(err) \
-                        or stack >= PIXSTACK_MAX:
-                    raise
-                stack *= 4
-                print(f'    segmentation pixel stack full; retrying '
-                      f'with {stack}')
-    finally:
-        sep.set_extract_pixstack(old_stack)
-        sep.set_sub_object_limit(old_sub)
+    return sep_extract(
+        imf, s['thresh'], sig, mask, filter_kernel=make_kernel(s),
+        filter_type='conv', minarea=s['minarea'],
+        deblend_nthresh=1, deblend_cont=1.0,
+    )
 
 
 def diffuse_segments(imf, seg, objs, sig):
@@ -552,8 +524,9 @@ def star_column(cy, cx, x, y, G, canonical, b=BIN, eps=EPS):
     vals: array
         The wing at those cells
     """
-    profile_fn = getattr(canonical, 'profile', None)
-    r, T = canonical if profile_fn is None else profile_fn(float(G))
+    from .wing import profile_of
+
+    r, T = profile_of(canonical, float(G))
     flux = 10.0 ** (-0.4 * G)
     prof = flux * T
     below = np.flatnonzero(prof < eps)
@@ -666,7 +639,7 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
     pinned = stars[~free]
     if pinned.size:
         work = render_canonical_stars(
-            image.shape, pinned, canonical, gsub=99.0,
+            image.shape, pinned, canonical,
         )
         np.subtract(image, work, out=work)
     else:
@@ -748,7 +721,7 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
         # segment the full-resolution image minus the star model,
         # but not minus this pass's sky (see the module docstring)
         resid = render_canonical_stars(
-            image.shape, stars, canonical, gsub=99.0, amps=A, verbose=False,
+            image.shape, stars, canonical, amps=A, verbose=False,
         )
         np.subtract(image, resid, out=resid)
         seg_excl, diffuse = deep_segmentation(
@@ -768,7 +741,7 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
     node_err = sky_sigma * np.sqrt(np.maximum(cov, 0.0))
     sky_full = render_mesh(nodes, node_values, image.shape)
     model_full = render_canonical_stars(
-        image.shape, stars, canonical, gsub=99.0, amps=A, verbose=False,
+        image.shape, stars, canonical, amps=A, verbose=False,
     )
     return dict(
         A=A, free=free, sky=sky_full, star_model=model_full, nodes=nodes,

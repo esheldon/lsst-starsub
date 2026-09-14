@@ -13,8 +13,6 @@ between the visit project, which makes the wing files
 """
 import numpy as np
 
-from .census import GSUB
-
 
 # stars rendered for the response: the polynomial only sees the
 # wings outside the fit mask, and below this the wings are
@@ -34,17 +32,36 @@ class WingModel(object):
         self.r = np.asarray(r, dtype='f8')
         self.T = np.asarray(T, dtype='f8')
 
-    def __iter__(self):
-        # `r, T = model` works wherever a plain (r, T) is expected
-        return iter((self.r, self.T))
-
-    def profile(self, G):
+    def profile(self, G=None):
         """
         Return (r, T) for a star of magnitude G.
 
-        (r, T) for a star of magnitude G: the same for all
+        The same for every star; G is accepted so a model with a
+        magnitude term can take its place.
         """
         return self.r, self.T
+
+
+def profile_of(canonical, G=None):
+    """
+    Return the radial profile (r, T) of a wing given either way.
+
+    Parameters
+    ----------
+    canonical: (r, T) or WingModel
+        A plain radial table, or a model with profile(G)
+    G: float, optional
+        The star's Gaia G, for a model with a magnitude term
+
+    Returns
+    -------
+    r, T: arrays
+    """
+    profile_fn = getattr(canonical, 'profile', None)
+    if profile_fn is None:
+        r, T = canonical
+        return r, T
+    return profile_fn(G)
 
 
 def read_wing_model(fname):
@@ -86,9 +103,6 @@ def render_wing_image(shape, x, y, gmag, rt, k_in, calib,
     image (ny, nx) f4, and the number of stars rendered
     """
     ny, nx = shape
-    profile_fn = getattr(rt, 'profile', None)
-    if profile_fn is None:
-        r, T = rt
     image = np.zeros((ny, nx), dtype='f4')
     n = 0
     if amps is None:
@@ -96,8 +110,7 @@ def render_wing_image(shape, x, y, gmag, rt, k_in, calib,
     for xk, yk, gk, ak in zip(x, y, gmag, amps):
         if not gk < gmax or not ak > 0:
             continue
-        if profile_fn is not None:
-            r, T = profile_fn(float(gk))
+        r, T = profile_of(rt, float(gk))
         amp = ak * k_in * 10.0 ** (-0.4 * gk) / calib
         prof = amp * T
         below = np.flatnonzero(prof < eps)
@@ -123,16 +136,17 @@ def render_wing_image(shape, x, y, gmag, rt, k_in, calib,
     return image, n
 
 
-def render_canonical_stars(shape, stars, canonical, gsub=GSUB, amps=None,
+def render_canonical_stars(shape, stars, canonical, gsub=None, amps=None,
                            verbose=True):
     """
     the census stars' images (nJy) from the canonical wing, a pure
     prediction: 10^(-0.4 G) T(r) with T in nJy per unit Gaia flux,
-    times the per-star amplitudes when given
+    times the per-star amplitudes when given; gsub renders the stars
+    brighter than it, None every star
     """
     image, n = render_wing_image(
         shape, stars['x'], stars['y'], stars['G'], canonical, 1.0, 1.0,
-        gmax=gsub, eps=0.005, amps=amps,
+        gmax=np.inf if gsub is None else gsub, eps=0.005, amps=amps,
     )
     if verbose:
         print(f'    canonical star model: {n} stars rendered, '
