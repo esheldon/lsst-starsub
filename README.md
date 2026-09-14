@@ -29,6 +29,11 @@ shared core.
 
     pip install -e .
 
+`requirements.txt` lists the dependencies (conda-forge for ngmix
+and rustfits); `dev-requirements.txt` adds the test/lint tooling
+(`pytest`, `ruff`) that the CI workflow (`.github/workflows/test.yml`)
+runs: `ruff check` on the package, tests and scripts, then `pytest`.
+
 Nothing is imported from `lsst_mdet`, which calls this package for
 both of its star routes.  The LSST science pipelines are needed for
 the butler loaders and the command line; the characterization and

@@ -132,10 +132,9 @@ def read_gaia_file(fname, wcs, bbox, gmax=GMAX):
 
     Converted to the fetch_gaia layout so everything downstream is
     unchanged; the same circle as the TAP query is applied, plus the
-    gmax cut.  FITS files (lsst-starsub-make-gaia output, or any with
-    a table in the first extension) are read with rustfits, parquet
-    files with pandas.  Required columns are ra, dec (degrees) and a
-    G magnitude, phot_g_mean_mag or gaia_g_mag.  Proper motions pmra,
+    gmax cut.  A FITS file (lsst-starsub-make-gaia output, or any with
+    a table in the first extension).  Required columns are ra, dec
+    (degrees) and phot_g_mean_mag.  Proper motions pmra,
     pmdec (mas/yr, pmra including cos(dec)) are used when present,
     else set to zero and the positions used as given.  ruwe is not
     carried by the files and is set to 1 (the template
@@ -157,19 +156,11 @@ def read_gaia_file(fname, wcs, bbox, gmax=GMAX):
     gaia: structured array
         As fetch_gaia
     """
-    if fname.endswith('.parq') or fname.endswith('.parquet'):
-        import pandas as pd
-        data = pd.read_parquet(fname)
-        columns = list(data.columns)
-    else:
-        import rustfits
-        data = rustfits.read(fname)
-        columns = list(data.dtype.names)
+    import rustfits
 
-    if 'phot_g_mean_mag' in columns:
-        gmag = data['phot_g_mean_mag']
-    else:
-        gmag = data['gaia_g_mag']
+    data = rustfits.read(fname)
+    columns = list(data.dtype.names)
+    gmag = data['phot_g_mean_mag']
 
     if 'pmra' in columns and 'pmdec' in columns:
         pmra = data['pmra']
