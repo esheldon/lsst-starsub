@@ -133,24 +133,37 @@ def render_wing_image(shape, x, y, gmag, rt, k_in, calib,
         The number of stars rendered
     """
     ny, nx = shape
+
     image = np.zeros((ny, nx), dtype='f4')
+
     n = 0
+
     if amps is None:
         amps = np.ones(len(x))
+
     for xk, yk, gk, ak in zip(x, y, gmag, amps):
+
         if not gk < gmax or not ak > 0:
             continue
+
         r, T = profile_of(rt, float(gk))
+
         amp = ak * k_in * 10.0 ** (-0.4 * gk) / calib
+
         prof = amp * T
+
         below = np.flatnonzero(prof < eps)
+
         rmax = float(r[below[0]]) if below.size else float(r[-1])
+
         ix, iy = int(round(xk)), int(round(yk))
         m = int(np.ceil(rmax)) + 1
         x0, x1 = max(0, ix - m), min(nx, ix + m + 1)
         y0, y1 = max(0, iy - m), min(ny, iy + m + 1)
+
         if x1 <= x0 or y1 <= y0:
             continue
+
         # the window in blocks of rows: the radii and the
         # interpolated profile are double precision, and the
         # window of the brightest stars is the whole image
@@ -162,12 +175,16 @@ def render_wing_image(shape, x, y, gmag, rt, k_in, calib,
             image[y0 + r0:y0 + r1, x0:x1] += np.interp(
                 rr, r, prof, right=0.0,
             ).astype('f4')
+
         n += 1
+
     return image, n
 
 
-def render_canonical_stars(shape, stars, canonical, gsub=None, amps=None,
-                           verbose=True):
+def render_canonical_stars(
+    shape, stars, canonical, gsub=None, amps=None,
+    verbose=True,
+):
     """
     Render the census stars from the canonical wing, in nJy.
 

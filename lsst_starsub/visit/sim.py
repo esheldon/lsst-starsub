@@ -107,16 +107,21 @@ def core_factor_gaussian(sigma, canonical):
     factor: float
     """
     r, T = profile_of(canonical)
+
     m = int(np.ceil(CORE_R)) + 1
     gy, gx = np.mgrid[-m:m + 1, -m:m + 1]
     rr = np.hypot(gy, gx)
+
     psf_core = gaussian_core(rr, sigma)[rr < CORE_R].sum()
     can_core = np.interp(rr, r, T)[rr < CORE_R].sum()
+
     return can_core / psf_core
 
 
-def render_stars(shape, x, y, G, amp, canonical, fwhm_px, eps=DEFAULTS['eps'],
-                 gmax=DEFAULTS['render_gmax']):
+def render_stars(
+    shape, x, y, G, amp, canonical, fwhm_px, eps=DEFAULTS['eps'],
+    gmax=DEFAULTS['render_gmax'],
+):
     """
     Render the summed star image of one visit.
 
@@ -146,26 +151,37 @@ def render_stars(shape, x, y, G, amp, canonical, fwhm_px, eps=DEFAULTS['eps'],
     n: int
         The stars rendered
     """
+
     ny, nx = shape
+
     r, T = profile_of(canonical)
     sigma = fwhm_px / 2.3548
+
     C = core_factor_gaussian(sigma, canonical)
     image = np.zeros((ny, nx), dtype='f8')
+
     n = 0
+
     for xk, yk, gk, ak in zip(x, y, G, amp):
+
         if not gk < gmax:
             continue
+
         flux = 10.0 ** (-0.4 * gk)
         prof = flux * ak * T
         below = np.flatnonzero(prof < eps)
+
         rmax = float(r[below[0]]) if below.size else float(r[-1])
         rmax = max(rmax, 6 * sigma)
         m = int(np.ceil(rmax)) + 1
+
         ix, iy = int(round(xk)), int(round(yk))
         x0, x1 = max(0, ix - m), min(nx, ix + m + 1)
         y0, y1 = max(0, iy - m), min(ny, iy + m + 1)
+
         if x1 <= x0 or y1 <= y0:
             continue
+
         gy, gx = np.mgrid[y0:y1, x0:x1]
         rr = np.hypot(gy - yk, gx - xk)
         f = np.clip((rr - BLEND_R0) / (BLEND_R1 - BLEND_R0), 0.0, 1.0)
@@ -173,6 +189,7 @@ def render_stars(shape, x, y, G, amp, canonical, fwhm_px, eps=DEFAULTS['eps'],
         star += (1.0 - f) * C * flux * gaussian_core(rr, sigma)
         image[y0:y1, x0:x1] += star
         n += 1
+
     return image.astype('f4'), n
 
 
@@ -198,11 +215,13 @@ def amp_fractions(detected, grid=AMP_GRID):
     """
     ny, nx = detected.shape
     fr = []
+
     for i in range(grid[0]):
         for j in range(grid[1]):
             c = np.s_[i * ny // grid[0]:(i + 1) * ny // grid[0],
                       j * nx // grid[1]:(j + 1) * nx // grid[1]]
             fr.append(float(detected[c].mean()))
+
     return np.array(fr)
 
 
@@ -247,34 +266,45 @@ def adaptive_detection(exp, dilated, det, thresh, grow, max_iter=40):
     nfoot = 10 ** 12
     n_above = -99
     zero_amps = False
+
     for it in range(max_iter):
         cur = thresh
+
         if frac > MAX_DET_FRAC or nfoot <= 3:
             thresh = 1.07 * cur
+
         if n_above > 1:
             thresh = 1.1 * cur
+
         if frac < MIN_DET_FRAC:
             thresh = 0.8 * cur
+
         if zero_amps:
             thresh = 0.95 * cur
+
         det_exp = exp.clone()
+
         _clear_detected(det_exp.mask)
+
         res = _detect(det_exp, thresh, 1.0, grow=grow)
         mask = det_exp.mask
         mask |= dilated
         detected = (mask.array & det) != 0
+
         frac = float(detected.mean())
         nfoot = len(res.sources)
         minfoot = min(200, max(3, int(0.01 * res.numPosPeaks)))
         fr = amp_fractions(detected)
         n_above = int((fr > MAX_DET_FRAC).sum())
         zero_amps = bool((fr == 0).any())
+
         if (MIN_DET_FRAC < frac < MAX_DET_FRAC and n_above < 0.75 * n_amp
                 and not zero_amps and nfoot >= minfoot):
             if (n_above < max(1, int(0.15 * n_amp))
                     or frac < 0.85 * MAX_DET_FRAC):
                 break
             thresh = 1.07 * cur
+
     return mask, frac, thresh
 
 
@@ -328,25 +358,38 @@ def dm_background_pass(raw, var, satmask, fwhm_px, star_image=None):
     )
 
     ny, nx = raw.shape
-    mi = afwImage.MaskedImageF(geom.Box2I(geom.Point2I(0, 0),
-                                          geom.Extent2I(nx, ny)))
+    mi = afwImage.MaskedImageF(
+        geom.Box2I(
+            geom.Point2I(0, 0),
+            geom.Extent2I(nx, ny),
+        ),
+    )
+
     mi.image.array[:, :] = raw
     mi.variance.array[:, :] = var
+
     sat = mi.mask.getPlaneBitMask('SAT')
     mi.mask.array[satmask] |= sat
+
     exp = afwImage.ExposureF(mi)
+
     width = int(2 * np.ceil(4 * fwhm_px)) + 1
     exp.setPsf(SingleGaussianPsf(width, width, fwhm_px / 2.3548))
 
     # first pass on a plainly flattened image
-    bkg0 = sep.Background(np.ascontiguousarray(raw, dtype='f4'),
-                          bw=128, bh=128)
+    bkg0 = sep.Background(
+        np.ascontiguousarray(raw, dtype='f4'),
+        bw=128, bh=128,
+    )
+
     prelim = exp.clone()
     prelim.image.array[:, :] -= bkg0.back()
+
     _clear_detected(prelim.mask)
     _detect(prelim, PSF_DET_THRESHOLD, PSF_DET_MULTIPLIER, grow=2.4)
     dilated = prelim.mask.clone()
     _dilate_detected(dilated, PSF_DET_DILATE)
+
     del prelim
 
     det = afwImage.Mask.getPlaneBitMask(DETECTED_PLANES)
@@ -355,14 +398,18 @@ def dm_background_pass(raw, var, satmask, fwhm_px, star_image=None):
     mask, frac, thresh = adaptive_detection(
         exp, dilated, det, thresh, grow=STAR_BG_GROW_SIGMA,
     )
+
     fit, _ = fit_star_background(raw, mask, var)
+
     out = dict(
         fit=fit, delivered=raw - fit, mask=(mask.array & det) != 0,
         threshold=thresh, detected_fraction=frac,
     )
+
     if star_image is not None:
         fit_nostar, _ = fit_star_background(raw - star_image, mask, var)
         out['response'] = fit - fit_nostar
+
     return out
 
 
@@ -395,39 +442,51 @@ def simulate_visit(k, shape, x, y, G, amp, canonical, cfg, seed):
         offset
     """
     rng = np.random.default_rng(seed)
+
     fwhm = float(rng.uniform(cfg['fwhm_min'], cfg['fwhm_max']))
     fwhm_px = fwhm / cfg['pixel_scale']
+
     # the detector frame: the patch at a random offset, so the
     # polynomial's domain and bins differ between visits as the
     # dithers make them on the data
     det = int(cfg['detector_size'])
     ny, nx = shape
+
     if det > max(ny, nx):
         ox = int(rng.integers(0, det - nx + 1))
         oy = int(rng.integers(0, det - ny + 1))
         big = (det, det)
     else:
         ox, oy, big = 0, 0, shape
+
     cut = np.s_[oy:oy + ny, ox:ox + nx]
     sky = sky_image(big, cfg['sky_level'], cfg['sky_gradient'], rng)
+
     stars, nstar = render_stars(
         big, x + ox, y + oy, G, amp, canonical, fwhm_px, eps=cfg['eps'],
         gmax=cfg['render_gmax'],
     )
+
     # the variance follows the image as on the data (Poisson in
     # electrons): noise_sigma^2 at the sky level, more on the
     # stars, which is what keeps the moderately bright stars out
     # of the adaptive detection (pixel_stdev thresholds)
+
     var_factor = cfg['noise_sigma'] ** 2 / cfg['sky_level']
     var = (var_factor * (sky + stars)).astype('f4')
     raw = sky + stars + rng.normal(size=big).astype('f4') * np.sqrt(var)
+
     satmask = raw > cfg['sat_level']
     raw[satmask] = cfg['sat_level']
     var[satmask] = var_factor * cfg['sat_level']
     bg = dm_background_pass(raw, var, satmask, fwhm_px, star_image=stars)
-    print(f'    visit {k}: fwhm {fwhm:.2f}", {nstar} stars, sat frac '
-          f'{satmask.mean():.4f}, threshold {bg["threshold"]:.1f}, '
-          f'detected {bg["detected_fraction"]:.3f}')
+
+    print(
+        f'    visit {k}: fwhm {fwhm:.2f}", {nstar} stars, sat frac '
+        f'{satmask.mean():.4f}, threshold {bg["threshold"]:.1f}, '
+        f'detected {bg["detected_fraction"]:.3f}',
+    )
+
     return dict(
         fwhm=fwhm, delivered=bg['delivered'][cut],
         response=bg['response'][cut],
@@ -471,17 +530,25 @@ def simulate_coadd(shape, x, y, G, amp, canonical, cfg, seed=0, nproc=1):
     from multiprocessing import Pool
 
     n = cfg['nvisit']
-    jobs = [(k, shape, x, y, G, amp, canonical, cfg, seed * 1000 + k)
-            for k in range(n)]
-    sums = {k: np.zeros(shape, dtype='f8')
-            for k in ('none', 'response', 'stars', 'sky', 'raw', 'var')}
+    jobs = [
+        (k, shape, x, y, G, amp, canonical, cfg, seed * 1000 + k)
+        for k in range(n)
+    ]
+    sums = {
+        k: np.zeros(shape, dtype='f8')
+        for k in ('none', 'response', 'stars', 'sky', 'raw', 'var')
+    }
+
     satmask = np.zeros(shape, dtype=bool)
+
     rows = []
+
     if nproc > 1:
         pool = Pool(nproc)
         it = pool.imap(_worker, jobs)
     else:
         it = map(_worker, jobs)
+
     for v in it:
         sums['none'] += v['delivered']
         sums['response'] += v['response']
@@ -491,13 +558,16 @@ def simulate_coadd(shape, x, y, G, amp, canonical, cfg, seed=0, nproc=1):
         sums['var'] += v['var']
         satmask |= v['satmask']
         rows.append((v['fwhm'], v['threshold'], v['detected_fraction']))
+
     if nproc > 1:
         pool.close()
         pool.join()
+
     out = {k: (s / n).astype('f4') for k, s in sums.items()}
     out['var'] = (sums['var'] / n ** 2).astype('f4')
     out['satmask'] = satmask
     out['visits'] = np.array(rows, dtype=[
         ('fwhm', 'f8'), ('threshold', 'f8'), ('detected_fraction', 'f8'),
     ])
+
     return out

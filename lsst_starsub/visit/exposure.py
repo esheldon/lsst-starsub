@@ -163,6 +163,7 @@ def convert_mask(mask_array, plane_dict):
         b = bits(planes)
         if b:
             out[(mask_array & b) != 0] |= flag
+
     return out[:, :, np.newaxis]
 
 
@@ -295,6 +296,7 @@ class VisitExposure(object):
         """The usable pixels: finite positive variance, not NO_DATA."""
         var = self.variance.array
         mask0 = self.mask.array[:, :, 0]
+
         return (
             np.isfinite(var) & (var > 0)
             & ((mask0 & DM_NO_DATA) == 0)
@@ -319,6 +321,7 @@ def restore_background(vexp, which='initial'):
         The array added (zeros for 'none')
     """
     bg = vexp.backgrounds
+
     if which == 'initial':
         add = bg['initial_coarse'] + bg['initial_fine']
     elif which == 'fine':
@@ -330,10 +333,12 @@ def restore_background(vexp, which='initial'):
 
     vexp.image.array[:, :] += add
     vexp.restored += add
+
     print(
         f'    restored {which} background: '
         f'median {np.nanmedian(add):.1f} nJy'
     )
+
     return add
 
 
@@ -356,23 +361,29 @@ def build_wide_star_mask(stars, shape):
     """
     ny, nx = shape
     wide = np.zeros((ny, nx), dtype=bool)
+
     for st in stars:
         gmag = float(st['G'])
+
         if gmag < WIDE_GMAX:
             rad = float(min(template_out_half(gmag), TMPL_OUT_MAX))
         else:
             rad = float(circle_radius(gmag)) + WIDE_GROW
+
         ix = int(round(float(st['x'])))
         iy = int(round(float(st['y'])))
         ir = int(np.ceil(rad))
         y0, y1 = max(0, iy - ir), min(ny, iy + ir + 1)
         x0, x1 = max(0, ix - ir), min(nx, ix + ir + 1)
+
         if y1 <= y0 or x1 <= x0:
             continue
+
         ly, lx = np.mgrid[y0:y1, x0:x1]
         wide[y0:y1, x0:x1] |= (
             np.hypot(ly - float(st['y']), lx - float(st['x'])) <= rad
         )
+
     return wide
 
 
@@ -412,10 +423,12 @@ def sky_background(vexp, exclude, bw):
     bkg = sep.Background(image, mask=bad, bw=bw, bh=bw)
     back = bkg.back().astype('f4')
     vexp.image.array[:, :] -= back
+
     print(
         f'    sky background (bw {bw}, {bad.mean():.2f} masked): '
         f'globalback {bkg.globalback:.2f} rms {bkg.globalrms:.2f}'
     )
+
     return back
 
 
@@ -440,10 +453,12 @@ def star_model_image(shape, slist):
     return model
 
 
-def handle_stars_visit(vexp, gaia, gsub=GSUB, restore='initial',
-                       nround=NROUND, grow_bright=None,
-                       star_model='template', canonical=None,
-                       joint_spacing=None, joint_prior=None):
+def handle_stars_visit(
+    vexp, gaia, gsub=GSUB, restore='initial',
+    nround=NROUND, grow_bright=None,
+    star_model='template', canonical=None,
+    joint_spacing=None, joint_prior=None,
+):
     """
     Run the joint star-wing and sky characterization of one detector.
 
@@ -510,9 +525,11 @@ def handle_stars_visit(vexp, gaia, gsub=GSUB, restore='initial',
     stars, starmask, comps, dstar, x, y = patch_census(
         gaia, vexp.wcs, vexp.bbox, mask0, gsub=gsub,
     )
+
     # the fine-pass exclusion: every mask plus PRE_GROW, and the
     # bright-star masks plus grow_bright when asked for
     fine_excl = dstar < PRE_GROW
+
     if grow_bright is not None:
         from ..stamps import RESTORE_GMAX
         bright = stars[stars['G'] < RESTORE_GMAX]
@@ -534,8 +551,10 @@ def handle_stars_visit(vexp, gaia, gsub=GSUB, restore='initial',
     sky = np.zeros(mask0.shape, dtype='f4')
     star_model_img = np.zeros(mask0.shape, dtype='f4')
     slist = []
+
     if star_model != 'template' and canonical is None:
         raise ValueError(f'star_model {star_model!r} needs the canonical wing')
+
     if star_model == 'joint':
         from ..joint import SPACING, joint_fit
         jf = joint_fit(
@@ -556,14 +575,17 @@ def handle_stars_visit(vexp, gaia, gsub=GSUB, restore='initial',
             star_model=star_model_img, delivered=delivered, fwhm=fwhm,
             joint=jf,
         )
+
     for iround in range(nround):
         print(f'  round {iround + 1} of {nround}')
         bw = WIDE_BW if iround == 0 else PRE_BW
         excl = wide if iround == 0 else fine_excl
+
         if iround > 0:
             # re-anchor: put the stars back, refit the sky
             # without them in the boxes, then refit the stars
             vexp.image.array[:, :] += star_model_img
+
         sky += sky_background(vexp, exclude=excl, bw=bw)
 
         if star_model == 'canonical':
@@ -668,29 +690,36 @@ def select_coadd_inputs(butler, tract, patch, band, iq=None):
         visit, detector, weight, goodpix, iq_score, sorted by
         iq_score (nan last)
     """
+
     t = butler.get(
         'deep_coadd_input_summary_tract',
         dataId=dict(band=band, skymap=SKYMAP, tract=tract),
     )
+
     w = np.asarray(t['patch']) == patch
     n = int(w.sum())
+
     out = np.zeros(n, dtype=[
         ('visit', 'i8'), ('detector', 'i4'),
         ('weight', 'f8'), ('goodpix', 'i8'), ('iq_score', 'f8'),
     ])
+
     out['visit'] = np.asarray(t['visit'])[w]
     out['detector'] = np.asarray(t['detector'])[w]
     out['weight'] = np.asarray(t['weight'])[w]
     out['goodpix'] = np.asarray(t['goodpix'])[w]
     out['iq_score'] = np.nan
+
     if iq is not None:
         for i in range(n):
             out['iq_score'][i] = iq.get(
                 (int(out['visit'][i]), int(out['detector'][i])),
                 np.nan,
             )
+
     order = np.argsort(np.nan_to_num(out['iq_score'], nan=np.inf))
     out = out[order]
+
     print(
         f'    {n} coadd inputs for {tract} {patch} {band}, '
         f'{np.isfinite(out["iq_score"]).sum()} with an IQ score'
@@ -722,6 +751,7 @@ def render_background_list(bglist, layers, calib):
     from lsst.afw.math import ApproximateControl
 
     out = None
+
     for i in layers:
         bg, interp, undersample, approx, *_ = bglist[i]
         if approx != ApproximateControl.UNKNOWN:
@@ -729,6 +759,7 @@ def render_background_list(bglist, layers, calib):
         else:
             arr = bg.getImageF(interp, undersample).array
         out = arr.copy() if out is None else out + arr
+
     return (out * calib).astype('f4')
 
 
@@ -775,20 +806,27 @@ def load_visit_exposure(butler, visit, detector, rng=None):
     """
     from ..geom import ButlerWcs
 
-    did = dict(instrument=INSTRUMENT, visit=int(visit),
-               detector=int(detector))
+    did = dict(
+        instrument=INSTRUMENT, visit=int(visit),
+        detector=int(detector),
+    )
+
     print(f'    loading visit {visit} detector {detector}')
+
     # the preliminary image's calibration: ADU -> nJy for the
     # stored (ADU) backgrounds.  The visit_image photoCalib is
     # 1 (already nJy), so the value has to come from the
     # preliminary image
     prelim = butler.get('preliminary_visit_image', dataId=did)
     calib = float(prelim.getPhotoCalib().getCalibrationMean())
+
     try:
         have_vi = bool(butler.exists('visit_image', did))
     except Exception:
         have_vi = False
+
     exp = None
+
     if have_vi:
         exp = butler.get('visit_image', dataId=did)
         if not hasattr(exp.mask, 'getMaskPlaneDict'):
@@ -799,6 +837,7 @@ def load_visit_exposure(butler, visit, detector, rng=None):
             print('    visit_image is not an afw exposure; '
                   'calibrating the preliminary image')
             exp = None
+
     if exp is None:
         # the preliminary image calibrated to nJy.  On the weekly
         # run the two differ by 1.4 nJy rms (0.04 sky sigma), the
@@ -807,9 +846,11 @@ def load_visit_exposure(butler, visit, detector, rng=None):
         exp.setMaskedImage(
             prelim.getPhotoCalib().calibrateImage(prelim.getMaskedImage())
         )
+
     prelim_bg = butler.get(
         'preliminary_visit_image_background', dataId=did,
     )
+
     skycorr = butler.get('skyCorr', dataId=did)
 
     if len(prelim_bg) < 2:
@@ -817,14 +858,18 @@ def load_visit_exposure(butler, visit, detector, rng=None):
             f'expected at least 2 initial background layers, '
             f'got {len(prelim_bg)}'
         )
+
     describe_background_list(prelim_bg, 'initial')
     describe_background_list(skycorr, 'skycorr')
+
     # layer 0 is the coarse sky; the refinement is usually one
     # layer but some detectors carry extra iterations, summed
     # here into the fine model
+
     nfine = len(prelim_bg) - 1
     if nfine > 1:
         print(f'    {nfine} refinement layers in the initial model')
+
     backgrounds = dict(
         initial_coarse=render_background_list(prelim_bg, [0], calib),
         initial_fine=render_background_list(
@@ -834,8 +879,10 @@ def load_visit_exposure(butler, visit, detector, rng=None):
             skycorr, range(len(skycorr)), calib,
         ),
     )
+
     # the per-layer rendering must reproduce what the pipeline
     # subtracted (BackgroundList.getImage)
+
     for name, bgl, tot in (
         ('initial', prelim_bg,
          backgrounds['initial_coarse'] + backgrounds['initial_fine']),
@@ -848,6 +895,7 @@ def load_visit_exposure(butler, visit, detector, rng=None):
                 f'{name} layer rendering differs from getImage '
                 f'by up to {dmax:.3e} nJy'
             )
+
     mask = convert_mask(exp.mask.array, exp.mask.getMaskPlaneDict())
 
     if rng is None:
@@ -873,6 +921,7 @@ def load_visit_exposure(butler, visit, detector, rng=None):
         f'    band {vexp.band}, sky {vexp.sky_level:.0f} nJy, '
         f'sigma {vexp.sky_sigma:.1f} nJy, calib {calib:.4f}'
     )
+
     return vexp
 
 
@@ -897,6 +946,8 @@ def load_gaia_for_exposure(vexp, gaia_file=None, gmax=None):
 
     if gmax is None:
         gmax = GMAX
+
     if gaia_file is not None:
         return read_gaia_file(gaia_file, vexp.wcs, vexp.bbox, gmax=gmax)
+
     return fetch_gaia(vexp.wcs, vexp.bbox, gmax=gmax)

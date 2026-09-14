@@ -54,6 +54,7 @@ def visit_circle(butler, visit):
     cat = butler.get(
         'visit_summary', dataId=dict(instrument=INSTRUMENT, visit=int(visit)),
     )
+
     vecs = []
     for rec in cat:
         wcs = rec.getWcs()
@@ -64,15 +65,19 @@ def visit_circle(butler, visit):
             c = wcs.pixelToSky(float(corner.x), float(corner.y))
             v = c.getVector()
             vecs.append([v.x(), v.y(), v.z()])
+
     vecs = np.array(vecs)
+
     if vecs.size == 0:
         raise RuntimeError(f'visit {visit}: no detector has a wcs')
+
     mean = vecs.mean(axis=0)
     mean /= np.linalg.norm(mean)
     cosang = np.clip(vecs @ mean, -1, 1)
     radius = np.rad2deg(np.arccos(cosang).max()) + VISIT_MARGIN_DEG
     center = sphgeom.UnitVector3d(float(mean[0]), float(mean[1]),
                                   float(mean[2]))
+
     return sphgeom.Circle(center, sphgeom.Angle.fromDegrees(radius))
 
 
@@ -122,6 +127,7 @@ def make_visit_gaia_file(butler, visit, outfile, gmax=DEFAULT_GMAX):
     tmpfile = outfile + '.tmp'
     rustfits.write(tmpfile, stars, extname='gaia')
     os.replace(tmpfile, outfile)
+
     return outfile
 
 

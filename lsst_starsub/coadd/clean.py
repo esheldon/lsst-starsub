@@ -10,9 +10,11 @@ import os
 import numpy as np
 
 
-def run_clean(vexp, gaia, tbox, state_name, gsub, nround, grow_bright,
-              star_model, canonical, truth=None, inj=None,
-              joint_spacing=None, joint_prior=None):
+def run_clean(
+    vexp, gaia, tbox, state_name, gsub, nround, grow_bright,
+    star_model, canonical, truth=None, inj=None,
+    joint_spacing=None, joint_prior=None,
+):
     """
     Subtract the stars and the sky of a patch and measure the profiles.
 
@@ -68,12 +70,18 @@ def run_clean(vexp, gaia, tbox, state_name, gsub, nround, grow_bright,
         canonical=canonical, joint_spacing=joint_spacing,
         joint_prior=joint_prior,
     )
+
     shape = vexp.image.array.shape
+
     vexp.bbox = SimpleBox(0, shape[1], 0, shape[0])
+
     residual = vexp.image.array
+
     flat = res['delivered'] - res['sky']
+
     states = {state_name: res['delivered'], 'flat': flat,
               'residual': residual}
+
     if truth is not None:
         # the residual under a perfect star model (the sky
         # interpolation alone) and the model's error; the
@@ -81,26 +89,35 @@ def run_clean(vexp, gaia, tbox, state_name, gsub, nround, grow_bright,
         states['perfect'] = flat - truth
         states['model_error'] = res['star_model'] - truth
         from ..inject import measure_core_zero_point
-        measure_core_zero_point(flat, vexp.good, res['stars'],
-                                vexp.sky_sigma)
+        measure_core_zero_point(
+            flat, vexp.good, res['stars'],
+            vexp.sky_sigma,
+        )
+
     seg = field_segmentation(residual, vexp.good, vexp.sky_sigma)
     wide = build_wide_star_mask(res['stars'], seg.shape)
     ambient = ambient_levels(states, vexp, seg, wide)
+
     print('    ambient levels (nJy): ' + ', '.join(
         f'{k} {v:.2f}' for k, v in ambient.items()
     ))
+
     edges, ptable = measure_profiles(
         states, vexp, res['stars'], seg, ambient=ambient,
     )
+
     dedges, dtable = measure_profiles(
         states, vexp, res['stars'], seg, ambient=ambient, mode='dmask',
     )
+
     star_table = res['star_table']
+
     if inj is not None:
         from ..inject import flag_injected
         star_table = flag_injected(star_table, inj)
         ptable = flag_injected(ptable, inj)
         dtable = flag_injected(dtable, inj)
+
     return dict(
         res=res, states=states, seg=seg, ambient=ambient,
         edges=edges, ptable=ptable, dedges=dedges, dtable=dtable,
@@ -140,8 +157,11 @@ def write_clean_file(stem, out, meta, no_images=False, extra_tables=None):
 
     res = out['res']
     fname = stem + '.fits'
+
     print('writing:', fname)
+
     with rustfits.FITS(fname, 'w+') as fits:
+
         if not no_images:
             for name, arr in out['states'].items():
                 fits.write_image(
@@ -160,27 +180,39 @@ def write_clean_file(stem, out, meta, no_images=False, extra_tables=None):
                     np.ascontiguousarray(out['truth'], dtype='f4'),
                     extname='truth', compress='gzip_2',
                 )
+
         fits.write_table(out['star_table'], extname='gaia_stars')
+
         if out['inj'] is not None:
             fits.write_table(out['inj'], extname='injected')
+
         fits.write_table(out['ptable'], extname='profiles')
+
         edges = out['edges']
         edges_t = np.zeros(1, dtype=[('edges', 'f8', edges.size)])
         edges_t['edges'][0] = edges
+
         fits.write_table(edges_t, extname='edges')
         fits.write_table(out['dtable'], extname='profiles_dmask')
+
         dedges = out['dedges']
         dedges_t = np.zeros(1, dtype=[('edges', 'f8', dedges.size)])
         dedges_t['edges'][0] = dedges
+
         fits.write_table(dedges_t, extname='dmask_edges')
         fits.write_table(_meta_table(meta), extname='meta')
+
         for name, tab in (extra_tables or {}).items():
             fits.write_table(tab, extname=name)
+
     try:
-        plot_summary(stem + '.png', out['vexp'], res, out['states'],
-                     out['edges'], out['ptable'])
+        plot_summary(
+            stem + '.png', out['vexp'], res, out['states'],
+            out['edges'], out['ptable'],
+        )
     except Exception as err:
         print(f'    WARNING: summary plot failed: {err!r}')
+
     return fname
 
 

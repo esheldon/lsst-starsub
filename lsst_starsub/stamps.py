@@ -81,6 +81,7 @@ AUR_AMP_GUARD = 10.0  # fitted amp within this factor of the
 # outer wings), so the canonical route uses continuity at
 # AUR_BREAK, the tier-3 convention; remeasure from restored
 # production runs when a body of them exists
+
 CANON = {
     'g': dict(
         slope=-3.800, ln_a=0.292,
@@ -103,6 +104,7 @@ CANON = {
         prior_sig=0.120, raw_sig=0.181,
     ),
 }
+
 # the canonical sparse-field route: below TMPL_MIN_STAMPS but
 # at least this many stamps, fit one amplitude against the
 # canonical shape (with the seeing prior) instead of the free
@@ -808,6 +810,7 @@ def psf_cube_fwhm(psfs, scale=0.2):
 
     if len(fwhms) == 0:
         return None
+
     return float(np.median(fwhms))
 
 
@@ -1361,8 +1364,10 @@ def solve_joint_amplitudes(image, slist, zp):
     return model
 
 
-def subtract_stars(image, var, mask0, gaia, x, y, stars, comps,
-                   band=None, fwhm=None):
+def subtract_stars(
+    image, var, mask0, gaia, x, y, stars, comps,
+    band=None, fwhm=None,
+):
     """
     Subtract every census star, modifying the image in place.
 

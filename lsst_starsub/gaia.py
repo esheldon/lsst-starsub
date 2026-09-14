@@ -78,7 +78,9 @@ def fetch_gaia(wcs, bbox, gmax=GMAX):
         rad=rad,
         gmax=gmax,
     )
+
     print(query)
+
     data = urllib.parse.urlencode({
         'REQUEST': 'doQuery',
         'LANG': 'ADQL',
@@ -88,6 +90,7 @@ def fetch_gaia(wcs, bbox, gmax=GMAX):
 
     text = None
     errors = []
+
     for url in GAIA_TAP_URLS:
         try:
             with urllib.request.urlopen(
@@ -108,14 +111,17 @@ def fetch_gaia(wcs, bbox, gmax=GMAX):
             print(f'    gaia query failed at {url}: {err}')
             errors.append(f'{url}: {err}')
             text = None
+
     if text is None:
         raise RuntimeError(
             'all gaia TAP services failed:\n    '
             + '\n    '.join(errors)
         )
+
     gaia = np.genfromtxt(
         io.StringIO(text), delimiter=',', names=True,
     )
+
     print(f'    gaia: {gaia.size} stars')
     return gaia
 
@@ -182,6 +188,7 @@ def read_gaia_file(fname, wcs, bbox, gmax=GMAX):
         pmra=pmra,
         pmdec=pmdec,
     )
+
     print(f'    gaia from {fname}: {gaia.size} stars')
     return gaia
 
@@ -218,10 +225,12 @@ def gaia_from_columns(
     """
     xmid = 0.5 * (bbox.x.start + bbox.x.stop)
     ymid = 0.5 * (bbox.y.start + bbox.y.stop)
+
     ctr = wcs.pixelToSky(xmid, ymid)
     corner = wcs.pixelToSky(
         float(bbox.x.start), float(bbox.y.start),
     )
+
     rad = ctr.separation(corner).asDegrees() + 0.02
 
     ra = np.asarray(ra, dtype='f8')
@@ -232,10 +241,12 @@ def gaia_from_columns(
     dec0 = np.deg2rad(ctr.getDec().asDegrees())
     rar = np.deg2rad(ra)
     decr = np.deg2rad(dec)
+
     cossep = (
         np.sin(dec0) * np.sin(decr)
         + np.cos(dec0) * np.cos(decr) * np.cos(rar - ra0)
     )
+
     sep = np.rad2deg(np.arccos(np.clip(cossep, -1, 1)))
 
     w, = np.where((sep <= rad) & (gmag < gmax))
@@ -244,12 +255,15 @@ def gaia_from_columns(
         ('pmra', 'f8'), ('pmdec', 'f8'),
         ('phot_g_mean_mag', 'f8'), ('ruwe', 'f8'),
     ])
+
     gaia['ra'] = ra[w]
     gaia['dec'] = dec[w]
     gaia['phot_g_mean_mag'] = gmag[w]
+
     if pmra is not None:
         gaia['pmra'] = np.asarray(pmra, dtype='f8')[w]
         gaia['pmdec'] = np.asarray(pmdec, dtype='f8')[w]
+
     gaia['ruwe'] = 1.0
     return gaia
 

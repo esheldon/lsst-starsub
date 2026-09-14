@@ -106,14 +106,19 @@ def star_window(shape, x, y, edges):
         Radius from the star on the window; None when empty
     """
     ny, nx = shape
+
     m = int(edges[-1]) + 2
     icx, icy = int(round(x)), int(round(y))
+
     x0, x1 = max(0, icx - m), min(nx, icx + m + 1)
     y0, y1 = max(0, icy - m), min(ny, icy + m + 1)
+
     if x1 <= x0 or y1 <= y0:
         return None, None
+
     gy, gx = np.mgrid[y0:y1, x0:x1]
     rr = np.hypot(gy - y, gx - x)
+
     return np.s_[y0:y1, x0:x1], rr
 
 
@@ -152,6 +157,7 @@ def star_profile(image, ok, rr, rad, edges):
         npix[i] = n
         if n >= MIN_PIX:
             prof[i] = np.median(image[w])
+
     return prof, npix
 
 
@@ -178,6 +184,7 @@ def exclusion_radius(gmag, wide):
         if gmag < WIDE_GMAX:
             return float(min(template_out_half(gmag), TMPL_OUT_MAX))
         return float(circle_radius(gmag)) + WIDE_GROW
+
     return float(circle_radius(gmag)) + APOD_STARS
 
 
@@ -220,6 +227,7 @@ def usable_pixels(good, seg, stars, st, sl, rr, wide=True):
 
     ny, nx = ok.shape
     y0, x0 = sl[0].start, sl[1].start
+
     for ot in stars:
         if ot['x'] == st['x'] and ot['y'] == st['y']:
             continue
@@ -238,15 +246,18 @@ def usable_pixels(good, seg, stars, st, sl, rr, wide=True):
         gy, gx = np.mgrid[by0 + y0:by1 + y0, bx0 + x0:bx1 + x0]
         sub = ok[by0:by1, bx0:bx1]
         sub &= np.hypot(gy - oy, gx - ox) > orad
+
     return ok
 
 
 LOCAL_REF = (500.0, 600.0)   # d - r_mask range of the local reference
 
 
-def measure_profiles(states, vexp, stars, seg, gmax=17.0, mode='r',
-                     ambient=None, wide=True, local_ref=LOCAL_REF,
-                     edges=None, gmin=None, good=None):
+def measure_profiles(
+    states, vexp, stars, seg, gmax=17.0, mode='r',
+    ambient=None, wide=True, local_ref=LOCAL_REF,
+    edges=None, gmin=None, good=None,
+):
     """
     Measure the per-star profiles on every image state.
 
@@ -297,6 +308,7 @@ def measure_profiles(states, vexp, stars, seg, gmax=17.0, mode='r',
         (sky-sigma units, ambient-referenced), npix, local (the
         local reference level, NaN when unmeasurable), nlocal
     """
+
     if edges is not None:
         edges = np.asarray(edges, dtype='f8')
     elif mode == 'r':
@@ -305,16 +317,21 @@ def measure_profiles(states, vexp, stars, seg, gmax=17.0, mode='r',
         edges = dmask_edges()
     else:
         raise ValueError(f'unknown mode {mode!r}')
+
     nb = edges.size - 1
     sig = vexp.sky_sigma
+
     names = list(states.keys())
     maxlen = max(len(n) for n in names)
+
     if ambient is None:
         ambient = {name: 0.0 for name in names}
 
     if good is None:
         good = vexp.good
+
     rows = []
+
     for si, st in enumerate(stars):
         if not st['on_image'] or float(st['G']) >= gmax:
             continue
@@ -350,13 +367,17 @@ def measure_profiles(states, vexp, stars, seg, gmax=17.0, mode='r',
         ('state', f'U{maxlen}'), ('prof', 'f4', nb),
         ('npix', 'i4', nb), ('local', 'f4'), ('nlocal', 'i4'),
     ])
+
     for i, row in enumerate(rows):
         table[i] = row
+
     return edges, table
 
 
-def stack_profiles(table, state, glo, ghi, min_stars=2,
-                   normalize=True):
+def stack_profiles(
+    table, state, glo, ghi, min_stars=2,
+    normalize=True,
+):
     """
     Stack the profiles of one state over a G slice.
 
@@ -382,21 +403,28 @@ def stack_profiles(table, state, glo, ghi, min_stars=2,
     count: int array
         The stars contributing per annulus
     """
+
     w = (
         (table['state'] == state)
         & (table['G'] >= glo) & (table['G'] < ghi)
     )
+
     if w.sum() == 0:
         nb = table['prof'].shape[1]
         return np.full(nb, np.nan), np.zeros(nb, dtype=int)
+
     profs = table['prof'][w]
+
     if normalize:
         profs = profs / (
             10.0 ** (-0.4 * table['G'][w])
         )[:, np.newaxis]
+
     count = np.sum(np.isfinite(profs), axis=0)
     med = np.full(profs.shape[1], np.nan)
     wc = count >= min_stars
+
     if wc.any():
         med[wc] = np.nanmedian(profs[:, wc], axis=0)
+
     return med, count

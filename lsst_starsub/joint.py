@@ -24,6 +24,7 @@ No exclusion zone and no interpolation: the toy fits showed this
 reaches the noise floor at the mask edge where the sequential
 sky-then-amplitude scheme leaves the collar
 """
+
 import numpy as np
 
 # the source segmentation's detection settings: metadetection's own
@@ -42,10 +43,10 @@ DETECT_SETTINGS = dict(
 BIN = 4
 SPACING = 256
 GFIT = 17.0
-EPS = 0.005      # nJy: each star's column extends to where it falls below
+EPS = 0.005  # nJy: each star's column extends to where it falls below
 MIN_CELL_FRAC = 0.5
 NPASS = 2
-SEG_GROW = 4     # px: the deep segmentation's footprints are grown by this
+SEG_GROW = 4  # px: the deep segmentation's footprints are grown by this
 # large sources also get an elliptical mask: a big galaxy's wing beyond
 # its isophote still lifts the sky mesh under it (a dark halo).  The
 # ellipse reaches the isophotal radius plus SEG_BIG_K rms sizes (sep's
@@ -55,7 +56,7 @@ SEG_GROW = 4     # px: the deep segmentation's footprints are grown by this
 # ~60% of the halo under bright ellipticals for +7 percentage points of
 # masked area; smaller area thresholds also grow ordinary galaxies).
 # Read at call time
-SEG_BIG_NPIX = 3000   # px: isophotal area from which the growth applies
+SEG_BIG_NPIX = 3000  # px: isophotal area from which the growth applies
 SEG_BIG_K = 4.0
 # px: cap on the ellipse's semi-major axis.  650 reaches the giant
 # elliptical of 09224-00089 (617 px uncapped); with 300 its envelope
@@ -92,7 +93,7 @@ MESH_SMOOTH_DELTA = 0.1
 # r-i at S/N 10-20), so joint_fit returns the region for masking.
 # None: off, every segment is a source.  Read at call time
 SEG_DIFFUSE_MEDIAN = 1.6
-SEG_DIFFUSE_BW = 32   # px
+SEG_DIFFUSE_BW = 32  # px
 RENDER_BLOCK = 256  # rows per block when rendering the mesh
 # the amplitude prior about the prediction (A = 1): the color
 # scatter of the i-band to Gaia G flux ratio; isolated stars are
@@ -125,15 +126,23 @@ def make_kernel(detect_settings=None):
     s = DETECT_SETTINGS if detect_settings is None else detect_settings
     fwhm = s['kernel_fwhm'] / s['pixel_scale']  # pixels
     T = ngmix.moments.fwhm_to_T(fwhm)
+
     kernel_gm = ngmix.GMixModel(
         pars=[0.0, 0.0, 0.0, 0.0, T, 1.0],
         model='gauss',
     )
+
     return kernel_gm.make_image([7, 7])
 
 
-def deep_segmentation(image, good, sig, grow=SEG_GROW, return_diffuse=False,
-                      detect_settings=None):
+def deep_segmentation(
+    image,
+    good,
+    sig,
+    grow=SEG_GROW,
+    return_diffuse=False,
+    detect_settings=None
+):
     """
     Segment the sources with the metadetection detection settings.
 
@@ -174,24 +183,37 @@ def deep_segmentation(image, good, sig, grow=SEG_GROW, return_diffuse=False,
     from scipy import ndimage
 
     imf = np.ascontiguousarray(image, dtype='f4')
+
     objs, seg = _extract(imf, sig, ~good, detect_settings=detect_settings)
     det = seg > 0
     diffuse = diffuse_segments(imf, seg, objs, sig)
     region = np.zeros(det.shape, dtype=bool)
+
     if diffuse.size:
         region = np.isin(seg, diffuse)
+
         det &= ~region
-        det |= compact_in_diffuse(imf, good & region, sig,
-                                  detect_settings=detect_settings)
+
+        det |= compact_in_diffuse(
+            imf, good & region, sig, detect_settings=detect_settings
+        )
+
         objs = np.delete(objs, diffuse - 1)
-        print(f'    {diffuse.size} diffuse segments left to the sky fit '
-              f'({region[good].mean() * 100:.1f} percent of the good '
-              f'pixels)')
+
+        print(
+            f'    {diffuse.size} diffuse segments left to the sky fit '
+            f'({region[good].mean() * 100:.1f} percent of the good '
+            f'pixels)'
+        )
+
     if grow > 0:
         det = ndimage.binary_dilation(det, iterations=int(grow))
+
     grow_big_sources(det, objs)
+
     if return_diffuse:
         return det, region
+
     return det
 
 
@@ -224,9 +246,15 @@ def _extract(imf, sig, mask, detect_settings=None):
 
     s = DETECT_SETTINGS if detect_settings is None else detect_settings
     return sep_extract(
-        imf, s['thresh'], sig, mask, filter_kernel=make_kernel(s),
-        filter_type='conv', minarea=s['minarea'],
-        deblend_nthresh=1, deblend_cont=1.0,
+        imf,
+        s['thresh'],
+        sig,
+        mask,
+        filter_kernel=make_kernel(s),
+        filter_type='conv',
+        minarea=s['minarea'],
+        deblend_nthresh=1,
+        deblend_cont=1.0,
     )
 
 
@@ -253,19 +281,26 @@ def diffuse_segments(imf, seg, objs, sig):
     ids: int array
         The segmentation labels of the diffuse segments
     """
+
     if SEG_DIFFUSE_MEDIAN is None:
         return np.zeros(0, dtype=int)
+
     ids = np.flatnonzero(objs['npix'] >= SEG_BIG_NPIX) + 1
     if ids.size == 0:
         return ids
+
     # the pixels of each large segment, sorted by label once
     sel = np.isin(seg, ids)
     lab, val = seg[sel], imf[sel]
     order = np.argsort(lab, kind='stable')
     lab, val = lab[order], val[order]
+
     bounds = np.searchsorted(lab, np.append(ids, ids[-1] + 1))
-    med = np.array([np.median(val[bounds[k]:bounds[k + 1]])
-                    for k in range(ids.size)])
+
+    med = np.array(
+        [np.median(val[bounds[k] : bounds[k + 1]]) for k in range(ids.size)]
+    )
+
     return ids[med < SEG_DIFFUSE_MEDIAN * sig]
 
 
@@ -296,10 +331,13 @@ def compact_in_diffuse(imf, region, sig, detect_settings=None):
     """
     import sep
 
-    bkg = sep.Background(imf, mask=~region, bw=SEG_DIFFUSE_BW,
-                         bh=SEG_DIFFUSE_BW, fw=3, fh=3)
+    bkg = sep.Background(
+        imf, mask=~region, bw=SEG_DIFFUSE_BW, bh=SEG_DIFFUSE_BW, fw=3, fh=3
+    )
+
     resid = np.ascontiguousarray(imf - bkg.back(), dtype='f4')
     _, seg = _extract(resid, sig, ~region, detect_settings=detect_settings)
+
     return seg > 0
 
 
@@ -322,12 +360,16 @@ def grow_big_sources(det, objs):
     import sep
 
     big = objs[objs['npix'] >= SEG_BIG_NPIX]
+
     if big.size == 0 or SEG_BIG_K <= 0:
         return
+
     a = np.maximum(big['a'], 1.0)
     b = np.maximum(big['b'], 1.0)
+
     riso = np.sqrt(big['npix'] / np.pi)
     scale = np.minimum(riso / a + SEG_BIG_K, SEG_BIG_RMAX / a)
+
     sep.mask_ellipse(det, big['x'], big['y'], a, b, big['theta'], r=scale)
 
 
@@ -355,13 +397,19 @@ def binned_cells(image, ok, b=BIN):
     cy, cx: arrays (my, mx)
         The cell centers, pixel coordinates
     """
+
     ny, nx = image.shape
     my, mx = ny // b, nx // b
-    o = ok[:my * b, :mx * b].reshape(my, b, mx, b)
-    img = np.where(o, image[:my * b, :mx * b].reshape(my, b, mx, b), 0.0)
+
+    o = ok[: my * b, : mx * b].reshape(my, b, mx, b)
+
+    img = np.where(o, image[: my * b, : mx * b].reshape(my, b, mx, b), 0.0)
+
     n = o.sum(axis=(1, 3))
     mean = img.sum(axis=(1, 3)) / np.maximum(n, 1)
+
     cy, cx = (np.mgrid[0:my, 0:mx] + 0.5) * b - 0.5
+
     return mean, n, cy, cx
 
 
@@ -394,26 +442,35 @@ def mesh_columns(cy, cx, shape, spacing):
     from scipy import sparse
 
     ny, nx = shape
+
     xn = np.arange(0, nx + spacing, spacing, dtype='f8')
     yn = np.arange(0, ny + spacing, spacing, dtype='f8')
+
     nxn, nyn = xn.size, yn.size
     cxf, cyf = cx.ravel(), cy.ravel()
+
     ix = np.clip((cxf // spacing).astype(int), 0, nxn - 2)
     iy = np.clip((cyf // spacing).astype(int), 0, nyn - 2)
+
     fx = (cxf - xn[ix]) / spacing
     fy = (cyf - yn[iy]) / spacing
+
     rows, cols, vals = [], [], []
     ncell = cxf.size
+
     idx = np.arange(ncell)
+
     for dy, wy in ((0, 1 - fy), (1, fy)):
         for dx, wx in ((0, 1 - fx), (1, fx)):
             rows.append(idx)
             cols.append((iy + dy) * nxn + ix + dx)
             vals.append(wy * wx)
+
     H = sparse.csc_matrix(
         (np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))),
         shape=(ncell, nxn * nyn),
     )
+
     return H, (xn, yn)
 
 
@@ -437,13 +494,19 @@ def mesh_difference_matrix(nodes):
     from scipy import sparse
 
     xn, yn = nodes
+
     idx = np.arange(xn.size * yn.size).reshape(yn.size, xn.size)
+
     a = np.concatenate([idx[:, :-1].ravel(), idx[:-1, :].ravel()])
     b = np.concatenate([idx[:, 1:].ravel(), idx[1:, :].ravel()])
+
     rows = np.arange(a.size)
+
     return sparse.csr_matrix(
-        (np.concatenate([np.ones(a.size), -np.ones(a.size)]),
-         (np.concatenate([rows, rows]), np.concatenate([a, b]))),
+        (
+            np.concatenate([np.ones(a.size), -np.ones(a.size)]),
+            (np.concatenate([rows, rows]), np.concatenate([a, b])),
+        ),
         shape=(a.size, idx.size),
     )
 
@@ -474,23 +537,32 @@ def render_mesh(nodes, values, shape, block=RENDER_BLOCK):
         The rendered mesh
     """
     xn, yn = nodes
+
     vals = np.asarray(values, dtype='f8').reshape(yn.size, xn.size)
+
     ny, nx = shape
     spacing = float(xn[1] - xn[0])
+
     xs = np.arange(nx, dtype='f8')
     ys = np.arange(ny, dtype='f8')
+
     ix = np.clip((xs // spacing).astype(int), 0, xn.size - 2)
     iy = np.clip((ys // spacing).astype(int), 0, yn.size - 2)
+
     fx = (xs - xn[ix]) / spacing
     fy = (ys - yn[iy]) / spacing
+
     wx0 = (1 - fx)[None, :]
     wx1 = fx[None, :]
+
     out = np.empty((ny, nx), dtype='f4')
+
     for y0 in range(0, ny, block):
         y1 = min(ny, y0 + block)
         fyb = fy[y0:y1, None]
         rows = (1 - fyb) * vals[iy[y0:y1]] + fyb * vals[iy[y0:y1] + 1]
         out[y0:y1] = wx0 * rows[:, ix] + wx1 * rows[:, ix + 1]
+
     return out
 
 
@@ -527,30 +599,55 @@ def star_column(cy, cx, x, y, G, canonical, b=BIN, eps=EPS):
     from .wing import profile_of
 
     r, T = profile_of(canonical, float(G))
+
     flux = 10.0 ** (-0.4 * G)
     prof = flux * T
+
     below = np.flatnonzero(prof < eps)
+
     rmax = float(r[below[0]]) if below.size else float(r[-1])
+
     my, mx = cy.shape
+
     i0 = max(0, int((y - rmax) // b) - 1)
     i1 = min(my, int((y + rmax) // b) + 2)
     j0 = max(0, int((x - rmax) // b) - 1)
     j1 = min(mx, int((x + rmax) // b) + 2)
+
     if i1 <= i0 or j1 <= j0:
         return np.zeros(0, dtype=int), np.zeros(0)
+
     sub_y = cy[i0:i1, j0:j1]
     sub_x = cx[i0:i1, j0:j1]
+
     rr = np.hypot(sub_y - y, sub_x - x)
     vals = np.interp(rr, r, prof, right=0.0)
+
     w = vals > 0
+
     ii, jj = np.nonzero(w)
+
     idx = (ii + i0) * mx + (jj + j0)
+
     return idx, vals[w]
 
 
-def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
-              gfit=GFIT, b=BIN, npass=NPASS, eps=EPS, variance=None,
-              prior_sigma=PRIOR_SIGMA, detect_settings=None, verbose=True):
+def joint_fit(
+    image,
+    good,
+    stars,
+    canonical,
+    sky_sigma,
+    spacing=SPACING,
+    gfit=GFIT,
+    b=BIN,
+    npass=NPASS,
+    eps=EPS,
+    variance=None,
+    prior_sigma=PRIOR_SIGMA,
+    detect_settings=None,
+    verbose=True,
+):
     """
     Fit the star amplitudes and the sky mesh together.
 
@@ -615,22 +712,38 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
     from .wing import render_canonical_stars
 
     ny, nx = image.shape
+
     good = good & np.isfinite(image)
+
     if variance is not None:
         good &= np.isfinite(variance) & (variance > 0)
+
     x, y, G = stars['x'], stars['y'], stars['G'].astype('f8')
+
     on = (x >= 0) & (x < nx) & (y >= 0) & (y < ny)
+
     free = on & (G < gfit)
     nfree = int(free.sum())
 
     # free stars need cells to be fit on: those whose window holds
     # no good cell (inside masks or no-data regions) are pinned as
     # well, or the normal matrix is singular
+
     mean0, n0, cy, cx = binned_cells(image, good, b)
-    has_cells = (n0 >= MIN_CELL_FRAC * b * b)
+    has_cells = n0 >= MIN_CELL_FRAC * b * b
+
     for si in np.flatnonzero(free):
-        idx, v = star_column(cy, cx, float(x[si]), float(y[si]), float(G[si]),
-                             canonical, b=b, eps=eps)
+        idx, v = star_column(
+            cy,
+            cx,
+            float(x[si]),
+            float(y[si]),
+            float(G[si]),
+            canonical,
+            b=b,
+            eps=eps,
+        )
+
         if idx.size == 0 or not has_cells.ravel()[idx].any():
             free[si] = False
     nfree = int(free.sum())
@@ -639,7 +752,9 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
     pinned = stars[~free]
     if pinned.size:
         work = render_canonical_stars(
-            image.shape, pinned, canonical,
+            image.shape,
+            pinned,
+            canonical,
         )
         np.subtract(image, work, out=work)
     else:
@@ -649,17 +764,28 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
     ncell = cy.size
     rows, cols, vals = [], [], []
     for k, si in enumerate(np.flatnonzero(free)):
-        idx, v = star_column(cy, cx, float(x[si]), float(y[si]), float(G[si]),
-                             canonical, b=b, eps=eps)
+        idx, v = star_column(
+            cy,
+            cx,
+            float(x[si]),
+            float(y[si]),
+            float(G[si]),
+            canonical,
+            b=b,
+            eps=eps,
+        )
         rows.append(idx)
         cols.append(np.full(idx.size, k))
         vals.append(v)
+
     P = sparse.csc_matrix(
         (np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))),
         shape=(ncell, nfree),
     )
+
     H, nodes = mesh_columns(cy, cx, image.shape, spacing)
     X = sparse.hstack([P, H]).tocsr()
+
     del P, H, rows, cols, vals
 
     # the smoothness prior on the mesh (MESH_SMOOTH_DELTA) in the
@@ -667,87 +793,133 @@ def joint_fit(image, good, stars, canonical, sky_sigma, spacing=SPACING,
     smooth = None
     if MESH_SMOOTH_DELTA is not None:
         D = mesh_difference_matrix(nodes)
-        smooth = (D.T @ D).toarray() / MESH_SMOOTH_DELTA ** 2
+        smooth = (D.T @ D).toarray() / MESH_SMOOTH_DELTA**2
 
     # first flattening for the segmentation: the mesh alone on
     # the good pixels
     seg_excl = np.zeros(image.shape, dtype=bool)
     diffuse = np.zeros(image.shape, dtype=bool)
     A = np.ones(stars.size)
+
     for ipass in range(npass):
         ok = good & ~seg_excl
         mean, n, _, _ = binned_cells(work, ok, b)
+
         w = (n >= MIN_CELL_FRAC * b * b).ravel() * n.ravel().astype('f8')
+
         if variance is not None:
             vmean, _, _, _ = binned_cells(variance, ok, b)
-            w = w * sky_sigma ** 2 / np.maximum(vmean.ravel(), 1e-12)
+            w = w * sky_sigma**2 / np.maximum(vmean.ravel(), 1e-12)
+
         W = sparse.diags(w)
         F = (X.T @ W @ X).toarray()
         rhs = X.T @ (w * mean.ravel())
+
         # a tiny ridge on the mesh keeps unsupported nodes finite
         F[nfree:, nfree:] += (
             np.eye(F.shape[0] - nfree) * 1e-6 * w.sum() / ncell
         )
+
         if smooth is not None:
             F[nfree:, nfree:] += smooth
+
         # and on the amplitudes, at a level far below any star's
         # own information (a star losing its cells to the pass-2
         # segmentation would otherwise make F singular)
+
         F[:nfree, :nfree] += np.eye(nfree) * 1e-9 * np.diag(F)[:nfree].max()
+
         if prior_sigma is not None:
             # the prior in the data term's units: F = X^T W X with
             # w the pixel counts (over the sky_sigma^2-relative
             # variance), so F is chi2 x sky_sigma^2 and the prior
             # 1/prior_sigma^2 enters times sky_sigma^2
-            pw = sky_sigma ** 2 / prior_sigma ** 2
+            pw = sky_sigma**2 / prior_sigma**2
             F[:nfree, :nfree] += np.eye(nfree) * pw
             rhs[:nfree] += pw
+
         sol = np.linalg.solve(F, rhs)
         A[free] = sol[:nfree]
         node_values = sol[nfree:]
         model_cells = X @ sol
         resid_cells = (mean.ravel() - model_cells) * (w > 0)
+
         # each cell's variance is sky_sigma^2 / n, so w resid^2 /
         # sigma^2 is its chi2
-        chi2 = float(np.sum(w * resid_cells ** 2) / sky_sigma ** 2
-                     / max(1, (w > 0).sum()))
+        chi2 = float(
+            np.sum(w * resid_cells**2) / sky_sigma**2 / max(1, (w > 0).sum())
+        )
+
         if verbose:
-            print(f'    joint fit pass {ipass + 1}: {nfree} amplitudes, '
-                  f'{node_values.size} nodes ({spacing} px), '
-                  f'{int((w > 0).sum())} cells, chi2/cell {chi2:.3f}; '
-                  f'A of the brightest: '
-                  + ' '.join(f'{A[si]:.3f}' for si in np.argsort(G)[:5]
-                             if free[si]))
+            print(
+                f'    joint fit pass {ipass + 1}: {nfree} amplitudes, '
+                f'{node_values.size} nodes ({spacing} px), '
+                f'{int((w > 0).sum())} cells, chi2/cell {chi2:.3f}; '
+                f'A of the brightest: '
+                + ' '.join(
+                    f'{A[si]:.3f}' for si in np.argsort(G)[:5] if free[si]
+                )
+            )
+
         if ipass == npass - 1:
             break
+
         # segment the full-resolution image minus the star model,
         # but not minus this pass's sky (see the module docstring)
         resid = render_canonical_stars(
-            image.shape, stars, canonical, amps=A, verbose=False,
+            image.shape,
+            stars,
+            canonical,
+            amps=A,
+            verbose=False,
         )
+
         np.subtract(image, resid, out=resid)
+
         seg_excl, diffuse = deep_segmentation(
-            resid, good, sky_sigma, return_diffuse=True,
+            resid,
+            good,
+            sky_sigma,
+            return_diffuse=True,
             detect_settings=detect_settings,
         )
+
         del resid
+
         if verbose:
-            print(f'    segmentation excludes '
-                  f'{seg_excl[good].mean() * 100:.1f} percent of the '
-                  f'good pixels')
+            print(
+                f'    segmentation excludes '
+                f'{seg_excl[good].mean() * 100:.1f} percent of the '
+                f'good pixels'
+            )
 
     del work
+
     # the node uncertainties, sky_sigma^2 F^-1 with the priors in
     # (white noise: the coadd's correlated noise makes them lower
     # bounds)
+
     cov = np.diag(np.linalg.inv(F))[nfree:]
     node_err = sky_sigma * np.sqrt(np.maximum(cov, 0.0))
     sky_full = render_mesh(nodes, node_values, image.shape)
+
     model_full = render_canonical_stars(
-        image.shape, stars, canonical, amps=A, verbose=False,
+        image.shape,
+        stars,
+        canonical,
+        amps=A,
+        verbose=False,
     )
+
     return dict(
-        A=A, free=free, sky=sky_full, star_model=model_full, nodes=nodes,
-        node_values=node_values, node_err=node_err, ncell=ncell, chi2=chi2,
+        A=A,
+        free=free,
+        sky=sky_full,
+        star_model=model_full,
+        nodes=nodes,
+        node_values=node_values,
+        node_err=node_err,
+        ncell=ncell,
+        chi2=chi2,
         diffuse=diffuse,
     )

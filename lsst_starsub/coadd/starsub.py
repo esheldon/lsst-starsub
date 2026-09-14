@@ -72,8 +72,10 @@ def wing_taper(r, rin=None, rout=None):
 
     rin = WING_RIN if rin is None else rin
     rout = WING_ROUT if rout is None else rout
-    return taper_from_distance(np.maximum(np.asarray(r) - rin, 0.0),
-                               rout - rin)
+    return taper_from_distance(
+        np.maximum(np.asarray(r) - rin, 0.0),
+        rout - rin,
+    )
 
 
 def core_amplitudes(image, good, x, y, G, wing, rap):
@@ -103,29 +105,40 @@ def core_amplitudes(image, good, x, y, G, wing, rap):
     amps: array
         The amplitudes, 1 the prediction
     """
+
     ny, nx = image.shape
+
     m = int(np.ceil(rap)) + 1
     amps = np.ones(len(x))
+
     for k, (xk, yk, gk) in enumerate(zip(x, y, G)):
         ix, iy = int(round(xk)), int(round(yk))
+
         if ix - m < 0 or iy - m < 0 or ix + m >= nx or iy + m >= ny:
             continue
+
         sl = np.s_[iy - m:iy + m + 1, ix - m:ix + m + 1]
         yy, xx = np.mgrid[iy - m:iy + m + 1, ix - m:ix + m + 1]
         rr = np.hypot(xx - xk, yy - yk)
         ap = rr <= rap
+
         if not good[sl][ap].all():
             continue
+
         r, T = wing.profile(float(gk))
         model = 10.0 ** (-0.4 * gk) * np.interp(rr[ap], r, T).sum()
         a = image[sl][ap].sum() / model
+
         if WING_AMP_RANGE[0] <= a <= WING_AMP_RANGE[1]:
             amps[k] = a
+
     return amps
 
 
-def subtract_faint_wings(image, gaia, x, y, wing, gsub, good=None,
-                         verbose=True):
+def subtract_faint_wings(
+    image, gaia, x, y, wing, gsub, good=None,
+    verbose=True,
+):
     """
     Subtract the predicted wings of the stars below the census depth.
 
@@ -162,36 +175,52 @@ def subtract_faint_wings(image, gaia, x, y, wing, gsub, good=None,
 
     if WING_GMAX is None or not WING_GMAX > gsub:
         return 0
+
     G = np.asarray(gaia['phot_g_mean_mag'], dtype='f8')
     ny, nx = image.shape
+
     sel = ((G >= gsub) & (G < WING_GMAX)
            & (x >= 0) & (x < nx) & (y >= 0) & (y < ny))
+
     if not sel.any():
         return 0
+
     faint = np.zeros(sel.sum(), dtype=[('x', 'f8'), ('y', 'f8'), ('G', 'f8')])
     faint['x'], faint['y'], faint['G'] = x[sel], y[sel], G[sel]
+
     amps = None
+
     if WING_CORE_RAP is not None:
         if good is None:
             good = np.ones(image.shape, dtype=bool)
-        amps = core_amplitudes(image, good, faint['x'], faint['y'],
-                               faint['G'], wing, WING_CORE_RAP)
+        amps = core_amplitudes(
+            image, good, faint['x'], faint['y'],
+            faint['G'], wing, WING_CORE_RAP,
+        )
+
     # rendered as the full model less its core: the renderer ends each
     # star's window where the profile first falls below its floor, so a
     # profile rising from zero, the wing alone, would render nothing
+
     core = WingModel(wing.r, wing.T * (1.0 - wing_taper(wing.r)))
     model = render_canonical_stars(image.shape, faint, wing,
                                    gsub=WING_GMAX, amps=amps, verbose=False)
     model -= render_canonical_stars(image.shape, faint, core,
                                     gsub=WING_GMAX, amps=amps, verbose=False)
     image -= model
+
     if verbose:
-        amp = ('the prediction' if amps is None else
-               f'from the cores, median {np.median(amps):.2f}, '
-               f'{np.mean(amps == 1.0) * 100:.0f} percent fallback')
-        print(f'    wings of {faint.size} stars of G {gsub:g}-{WING_GMAX:g} '
-              f'subtracted (cores kept, not masked; amplitude {amp}), max '
-              f'{model.max():.2f} nJy')
+        amp = (
+            'the prediction' if amps is None else
+            f'from the cores, median {np.median(amps):.2f}, '
+            f'{np.mean(amps == 1.0) * 100:.0f} percent fallback'
+        )
+        print(
+            f'    wings of {faint.size} stars of G {gsub:g}-{WING_GMAX:g} '
+            f'subtracted (cores kept, not masked; amplitude {amp}), max '
+            f'{model.max():.2f} nJy'
+        )
+
     return int(faint.size)
 
 
@@ -218,9 +247,11 @@ def load_wing(fname):
     return wing
 
 
-def handle_stars_joint(deep_coadd, wcs, gaia, wing, gsub=None,
-                       spacing=None, prior=None, detect_settings=None,
-                       verbose=True):
+def handle_stars_joint(
+    deep_coadd, wcs, gaia, wing, gsub=None,
+    spacing=None, prior=None, detect_settings=None,
+    verbose=True,
+):
     """
     Subtract the stars and the sky of a patch coadd with the joint fit.
 
@@ -292,6 +323,7 @@ def handle_stars_joint(deep_coadd, wcs, gaia, wing, gsub=None,
     )
 
     apply = getattr(deep_coadd, 'apply_background', None)
+
     if apply is not None:
         apply(None)
         bg_restored = 'object'
@@ -303,20 +335,25 @@ def handle_stars_joint(deep_coadd, wcs, gaia, wing, gsub=None,
 
     image = deep_coadd.image.array
     var = deep_coadd.variance.array
+
     good = (np.isfinite(var) & (var > 0) & ((mask0 & DM_NO_DATA) == 0)
             & ~starmask)
+
     sky_sigma = float(np.sqrt(np.median(var[good])))
+
     jf = joint_fit(
         image, good, stars, wing, sky_sigma,
         spacing=spacing, prior_sigma=prior, variance=var,
         detect_settings=detect_settings, verbose=verbose,
     )
+
     image -= jf['sky']
     image -= jf['star_model']
     nwing = subtract_faint_wings(image, gaia, x, y, wing, gsub, good=good,
                                  verbose=verbose)
     star_table = make_star_table(stars, [])
     star_table['A'] = jf['A']
+
     if verbose:
         nfree = int(jf['free'].sum())
         print(f'    joint star model: {nfree} amplitudes fit, '
@@ -395,23 +432,29 @@ def make_fit_tables(fits):
         return np.nan if v is None else v
 
     star_dtype = [(name, stars.dtype[name]) for name in CENSUS_COLUMNS]
+
     for band in bands:
         star_dtype += [(f'A_{band}', 'f8'), (f'free_{band}', 'i2')]
+
     star_table = np.zeros(nstar, dtype=star_dtype)
     for name in CENSUS_COLUMNS:
         star_table[name] = stars[name]
 
     sky_rows = []
     wing_rows = []
+
     for i, band in enumerate(bands):
         fit = fits[band]
+
         if fit['stars'].size != nstar:
             raise ValueError(
                 f'band {band} has {fit["stars"].size} census stars, '
                 f'band {bands[0]} has {nstar}'
             )
+
         xn, yn = fit['nodes']
         ny, nx = fit['shape']
+
         meta[i] = (
             band, nx, ny, fit['spacing'], xn.size, yn.size, fit['gsub'],
             fit['gfit'], fit['prior'], int(fit['free'].sum()),
@@ -422,6 +465,7 @@ def make_fit_tables(fits):
             setting(fit, 'wing_rout'), setting(fit, 'wing_core_rap'),
             fit.get('nwing', 0),
         )
+
         star_table[f'A_{band}'] = fit['A']
         star_table[f'free_{band}'] = fit['free']
 
@@ -430,6 +474,7 @@ def make_fit_tables(fits):
             ('band', 'U1'), ('ix', 'i2'), ('iy', 'i2'), ('x', 'f4'),
             ('y', 'f4'), ('value', 'f4'),
         ])
+
         sky['band'] = band
         sky['ix'] = ix.ravel()
         sky['iy'] = iy.ravel()
@@ -444,6 +489,7 @@ def make_fit_tables(fits):
         wing = np.zeros(r.size, dtype=[
             ('band', 'U1'), ('r', 'f4'), ('T', 'f4'),
         ])
+
         wing['band'] = band
         wing['r'] = r
         wing['T'] = T
@@ -508,8 +554,10 @@ def render_fit(tables, band):
 
     meta = tables[META_EXT]
     m = meta[meta['band'] == band]
+
     if m.size != 1:
         raise ValueError(f'band {band} not in the fit tables')
+
     m = m[0]
     shape = (int(m['ny']), int(m['nx']))
     spacing = float(m['spacing'])
@@ -531,4 +579,5 @@ def render_fit(tables, band):
         shape, stars, wing, amps=stars[f'A_{band}'],
         verbose=False,
     )
+
     return sky, star_model

@@ -193,10 +193,16 @@ def patch_census(gaia, wcs, bbox, mask0, gsub=GSUB, coadd=False, verbose=True):
     from .gaia import gaia_pixel_positions
 
     x, y = gaia_pixel_positions(gaia, wcs, bbox)
+
     stars = select_stars(gaia, x, y, mask0, gsub=gsub, verbose=verbose)
-    starmask, comps = build_star_mask(stars, mask0, verbose=verbose,
-                                      coadd=coadd)
+
+    starmask, comps = build_star_mask(
+        stars, mask0, verbose=verbose,
+        coadd=coadd,
+    )
+
     dstar = ndimage.distance_transform_edt(~starmask)
+
     return stars, starmask, comps, dstar, x, y
 
 
@@ -401,8 +407,10 @@ def sep_extract(imf, thresh, err, mask, retry_deblend=False, **kwargs):
     old_stack = sep.get_extract_pixstack()
     old_sub = sep.get_sub_object_limit()
     stack = SEG_PIXSTACK
+
     try:
         sep.set_sub_object_limit(10240)
+
         while True:
             sep.set_extract_pixstack(stack)
             try:
@@ -448,7 +456,9 @@ def make_star_table(stars, slist):
     star_table: structured array
         The census fields plus A
     """
+
     star_table = np.zeros(len(stars), dtype=_get_star_table_dtype())
+
     for name in (
         'ra',
         'dec',
@@ -562,10 +572,13 @@ def taper_from_distance(dist, width):
     taper: array
         The shape of dist
     """
+
     y = (np.asarray(dist, dtype=float) - width) * (6.0 / width) + 3
     out = np.where(y > 3, 1.0, 0.0)
+
     w = (y >= -3) & (y <= 3)
     yy = y[w]
+
     out[w] = (
         -5 * yy ** 7 / 69984
         + 7 * yy ** 5 / 2592
@@ -573,6 +586,7 @@ def taper_from_distance(dist, width):
         + 35 * yy / 96
         + 1 / 2
     )
+
     return out
 
 
@@ -597,13 +611,20 @@ def diffuse_mask(starsub_fits, margin):
     """
     from scipy import ndimage
 
-    masks = [fit['diffuse'] for fit in starsub_fits.values()
-             if fit.get('diffuse') is not None]
+    masks = [
+        fit['diffuse'] for fit in starsub_fits.values()
+        if fit.get('diffuse') is not None
+    ]
+
     if not masks:
         return None
+
     union = np.logical_or.reduce(masks)
+
     if not union.any():
         return None
+
     if margin > 0:
         union = ndimage.distance_transform_edt(~union) <= margin
+
     return union

@@ -94,6 +94,7 @@ def draw_positions(rng, plan, dstar, shape):
     ny, nx = shape
     clear = dstar > CENTER_CLEAR
     xs, ys, gs = [], [], []
+
     for (glo, ghi), n in plan:
         for _ in range(n):
             g = float(rng.uniform(glo, ghi))
@@ -111,8 +112,12 @@ def draw_positions(rng, plan, dstar, shape):
             xs.append(x)
             ys.append(y)
             gs.append(g)
-    return (np.array(xs, dtype='i8'), np.array(ys, dtype='i8'),
-            np.array(gs, dtype='f8'))
+
+    return (
+        np.array(xs, dtype='i8'),
+        np.array(ys, dtype='i8'),
+        np.array(gs, dtype='f8')
+    )
 
 
 def psf_cube(mcoadd):
@@ -136,12 +141,15 @@ def psf_cube(mcoadd):
     grid = mcoadd.grid
     shape = grid.shape
     cube = None
+
     for idx, cell in mcoadd.cells.items():
         p = cell.psf_image.array
         if cube is None:
             cube = np.zeros((shape.y, shape.x) + p.shape, dtype='f8')
         cube[idx.y, idx.x] = p
+
     gb = grid.bbox
+
     return cube, (gb.getBeginX(), gb.getBeginY()), grid.cell_size.x
 
 
@@ -163,19 +171,36 @@ def core_factor(psf, canonical):
     factor: float
     """
     r, T = profile_of(canonical)
+
     c = (psf.shape[0] - 1) // 2
+
     gy, gx = np.mgrid[0:psf.shape[0], 0:psf.shape[1]]
     rr = np.hypot(gy - c, gx - c)
     psf_core = psf[rr < CORE_R].sum()
+
     m = int(np.ceil(CORE_R)) + 1
+
     gy, gx = np.mgrid[-m:m + 1, -m:m + 1]
     rr = np.hypot(gy, gx)
+
     can_core = np.interp(rr, r, T)[rr < CORE_R].sum()
+
     return can_core / psf_core
 
 
-def render_injected(shape, x, y, G, canonical, cube, origin, cell_size,
-                    bbox_start, wing_scale=1.0, eps=EPS):
+def render_injected(
+    shape,
+    x,
+    y,
+    G,
+    canonical,
+    cube,
+    origin,
+    cell_size,
+    bbox_start,
+    wing_scale=1.0,
+    eps=EPS,
+):
     """
     Render the injected stars.
 
@@ -210,23 +235,32 @@ def render_injected(shape, x, y, G, canonical, cube, origin, cell_size,
         Per star, the canonical core flux (the sum within CORE_R)
     """
     ny, nx = shape
+
     r, T = profile_of(canonical)
     image = np.zeros((ny, nx), dtype='f8')
+
     npsf = cube.shape[-1]
     hp = (npsf - 1) // 2
+
     cores = []
+
     for xk, yk, gk in zip(x, y, G):
+
         flux = 10.0 ** (-0.4 * gk)
+
         # the cell psf at the position
         tx = xk + bbox_start[0]
         ty = yk + bbox_start[1]
+
         ci = int((tx - origin[0]) // cell_size)
         cj = int((ty - origin[1]) // cell_size)
         ci = min(max(ci, 0), cube.shape[1] - 1)
         cj = min(max(cj, 0), cube.shape[0] - 1)
+
         psf = cube[cj, ci]
         if not psf.sum() > 0:
             raise RuntimeError(f'empty psf in cell ({ci}, {cj})')
+
         C = core_factor(psf, canonical)
         cores.append(C * flux)
 
@@ -234,22 +268,30 @@ def render_injected(shape, x, y, G, canonical, cube, origin, cell_size,
         prof = flux * wing_scale * T
         below = np.flatnonzero(prof < eps)
         rmax = float(r[below[0]]) if below.size else float(r[-1])
+
         m = int(np.ceil(rmax)) + 1
         x0, x1 = max(0, xk - m), min(nx, xk + m + 1)
         y0, y1 = max(0, yk - m), min(ny, yk + m + 1)
+
         gy, gx = np.mgrid[y0:y1, x0:x1]
         rr = np.hypot(gy - yk, gx - xk)
+
         f = np.clip((rr - BLEND_R0) / (BLEND_R1 - BLEND_R0), 0.0, 1.0)
         star = f * np.interp(rr, r, prof, right=0.0)
+
         # the psf core on its own footprint
         px0, px1 = max(0, xk - hp), min(nx, xk + hp + 1)
         py0, py1 = max(0, yk - hp), min(ny, yk + hp + 1)
-        pcut = psf[py0 - (yk - hp):py1 - (yk - hp),
-                   px0 - (xk - hp):px1 - (xk - hp)]
+        pcut = psf[
+            py0 - (yk - hp):py1 - (yk - hp),
+            px0 - (xk - hp):px1 - (xk - hp)
+        ]
+
         core = np.zeros_like(star)
         core[py0 - y0:py1 - y0, px0 - x0:px1 - x0] = C * flux * pcut
         star += (1.0 - f) * core
         image[y0:y1, x0:x1] += star
+
     return image.astype('f4'), np.array(cores, dtype='f8')
 
 
@@ -317,6 +359,7 @@ def injected_table(x, y, G, ra, dec, cores, wing_scale):
     t['ra'], t['dec'] = ra, dec
     t['core_flux'] = cores
     t['wing_scale'] = wing_scale
+
     return t
 
 
@@ -346,6 +389,7 @@ def flag_injected(table, inj, tol=0.5):
             d = np.hypot(table['x'][k] - inj['x'], table['y'][k] - inj['y'])
             if d.min() < tol:
                 flag[k] = 1
+
     return rfn.append_fields(table, 'injected', flag, usemask=False)
 
 
@@ -377,28 +421,43 @@ def measure_core_zero_point(image, good, stars, sky_sigma, glo=15.5,
         The median core flux per unit Gaia flux
     """
     ny, nx = image.shape
+
     m = 20
+
     gy, gx = np.mgrid[-m:m + 1, -m:m + 1]
     rr = np.hypot(gy, gx)
+
     vals = []
     for st in stars:
         g = float(st['G'])
+
         if not (glo <= g < ghi) or not st['on_image']:
             continue
+
         ix, iy = int(round(st['x'])), int(round(st['y']))
+
         if ix < m or iy < m or ix >= nx - m or iy >= ny - m:
             continue
+
         cut = image[iy - m:iy + m + 1, ix - m:ix + m + 1].astype('f8')
         ok = good[iy - m:iy + m + 1, ix - m:ix + m + 1]
         ann = ok & (rr > 12) & (rr < 20)
+
         if ann.sum() < 20 or not ok[rr < CORE_R].all():
             continue
+
         loc = np.median(cut[ann])
         core = (cut - loc)[rr < CORE_R].sum()
         vals.append(core / 10.0 ** (-0.4 * g))
+
     if len(vals) == 0:
         return np.nan
+
     zp = float(np.median(vals))
-    print(f'    real-star core zero point: {zp:.3e} nJy per unit Gaia '
-          f'flux from {len(vals)} stars G {glo}-{ghi}')
+
+    print(
+        f'    real-star core zero point: {zp:.3e} nJy per unit Gaia '
+        f'flux from {len(vals)} stars G {glo}-{ghi}'
+    )
+
     return zp

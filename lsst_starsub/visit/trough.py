@@ -41,13 +41,17 @@ def radial_template(tmpl):
 
     p = tmpl['params']
     prof = tmpl['prof']
+
     r = np.concatenate([
         np.arange(0.0, 60.0, 0.5),
         np.logspace(np.log10(60.0), np.log10(RENDER_RMAX), 400)[1:],
     ])
+
     halo = wing_law(r, p['slope'], p['ln_a'], p['aur_slope'], p['aur_amp'])
     stack = np.interp(r, np.arange(prof.size), prof)
     frac = np.clip((r - R_BLEND) / (R_JOIN - R_BLEND), 0.0, 1.0)
+
     T = (1.0 - frac) * stack + frac * halo
     T[r >= R_JOIN] = halo[r >= R_JOIN]
+
     return r, T

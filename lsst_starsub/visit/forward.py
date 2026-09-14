@@ -64,16 +64,23 @@ def load_raw_exposure(butler, visit, detector):
         adaptive_threshold, psf_threshold, psf_multiplier,
         detected_fraction
     """
-    did = dict(instrument=INSTRUMENT, visit=int(visit),
-               detector=int(detector))
+    did = dict(
+        instrument=INSTRUMENT, visit=int(visit),
+        detector=int(detector),
+    )
+
     exp = butler.get('preliminary_visit_image', dataId=did)
+
     bglist = butler.get('preliminary_visit_image_background', dataId=did)
     calib = float(exp.getPhotoCalib().getCalibrationMean())
+
     md = butler.get('calibrateImage_metadata', dataId=did).to_dict()
     top = md['calibrateImage']
+
     # DP2's metadata lacks the psf-detection entries; the config
     # values (psf_detection thresholdValue 10, multiplier 5) were
     # what the weekly recorded on every detector checked
+
     meta = dict(
         adaptive_threshold=float(top['adaptive_threshold_value']),
         psf_threshold=float(top.get('psf_adaptive_threshold_value',
@@ -85,8 +92,10 @@ def load_raw_exposure(butler, visit, detector):
         detected_fraction=float(top.get('detected_mask_fraction',
                                         float('nan'))),
     )
+
     raw = exp.clone()
     raw.image.array[:, :] += bglist.getImage().array
+
     return raw, bglist, calib, meta
 
 
@@ -149,10 +158,12 @@ def _detect(exposure, threshold, multiplier, grow, clear=True):
     cfg.nSigmaToGrow = float(grow)
     cfg.doTempLocalBackground = False
     cfg.reEstimateBackground = False
+
     schema = afwTable.SourceTable.makeMinimalSchema()
     task = SourceDetectionTask(config=cfg, schema=schema)
     table = afwTable.SourceTable.make(schema)
     res = task.run(table=table, exposure=exposure, clearMask=clear)
+
     return res
 
 
@@ -194,6 +205,7 @@ def reconstruct_fit_mask(raw, prelim, meta):
     psf_exp.setPsf(SingleGaussianPsf(
         SIMPLE_PSF_WIDTH, SIMPLE_PSF_WIDTH, SIMPLE_PSF_FWHM / 2.3548,
     ))
+
     _clear_detected(psf_exp.mask)
     _detect(psf_exp, meta['psf_threshold'], meta['psf_multiplier'],
             grow=2.4)
@@ -215,6 +227,7 @@ def reconstruct_fit_mask(raw, prelim, meta):
     good = (mask.array & bad) == 0
     frac = float(((mask.array & det) != 0)[good].mean())
     dfrac = float(((dilated.array & det) != 0)[good].mean())
+
     return mask, dict(detected_fraction=frac, psf_dilated_fraction=dfrac)
 
 
@@ -281,6 +294,7 @@ def fit_star_background(image, mask, variance, stat='MEANCLIP'):
     exp = afwImage.ExposureF(mi)
     bglist = task.run(exposure=exp).background
     surface = bglist[0][0].getImageF().array.copy()
+
     return surface, bglist
 
 
