@@ -1,6 +1,6 @@
 """
-the wings of the stars below the census depth: the wing-only model
-and its subtraction, cores left in place
+the wings of the stars below the census depth: the core taper and the
+subtraction, cores left in place
 """
 import numpy as np
 
@@ -13,14 +13,13 @@ def _wing():
     return WingModel(r, 1e9 * np.exp(-r / 6.0) + 1e6 / (1 + r) ** 3)
 
 
-def test_wing_only():
-    wing = _wing()
-    wo = smod.wing_only(wing, rin=8.0, rout=16.0)
-    assert np.all(wo.T[wing.r <= 8.0] == 0)
-    far = wing.r >= 16.0
-    assert np.allclose(wo.T[far], wing.T[far])
-    mid = (wing.r > 8.0) & (wing.r < 16.0)
-    assert np.all((wo.T[mid] > 0) & (wo.T[mid] < wing.T[mid]))
+def test_wing_taper():
+    r = np.arange(0.0, 30.0, 0.5)
+    t = smod.wing_taper(r, rin=8.0, rout=16.0)
+    assert np.all(t[r <= 8.0] == 0)
+    assert np.allclose(t[r >= 16.0], 1.0)
+    mid = (r > 8.0) & (r < 16.0)
+    assert np.all((t[mid] > 0) & (t[mid] < 1))
 
 
 def _gaia():

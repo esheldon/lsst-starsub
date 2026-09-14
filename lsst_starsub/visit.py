@@ -51,7 +51,7 @@ are plain numpy
 import numpy as np
 
 from .census import (
-    APOD_STARS, GSUB, build_star_mask, circle_radius, field_segmentation,
+    GSUB, build_star_mask, circle_radius, field_segmentation,
     make_star_table, select_stars,
 )
 from .geom import SimpleBox
@@ -537,11 +537,6 @@ def handle_stars_visit(vexp, gaia, gsub=GSUB, restore='initial',
         delivered=delivered,
         fwhm=fwhm,
     )
-
-
-def apod_starmask(dstar, width=APOD_STARS):
-    """the attenuation zone as used downstream"""
-    return dstar < width
 
 
 # ---------------------------------------------------------------

@@ -30,9 +30,7 @@ response
 
 from .visit import INSTRUMENT
 
-# from CalibrateImageTask._remeasure_star_background; the extra
-# planes go into the pedestal fit only
-PEDESTAL_IGNORE_EXTRA = ['SAT', 'SUSPECT', 'SPIKE']
+# from CalibrateImageTask._remeasure_star_background
 STAR_BG_GROW_SIGMA = 70.0
 PSF_DET_DILATE = 10
 SIMPLE_PSF_FWHM = 4.0

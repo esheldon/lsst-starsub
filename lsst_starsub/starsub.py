@@ -76,31 +76,6 @@ def wing_taper(r, rin=None, rout=None):
                                rout - rin)
 
 
-def wing_only(wing, rin=None, rout=None):
-    """
-    Return the wing model with its core tapered away.
-
-    The profile times wing_taper, for stars whose cores are left in
-    the image.
-
-    Parameters
-    ----------
-    wing: WingModel
-        The full wing model, core included
-    rin, rout: float, optional
-        The taper's inner and outer radii in px; default WING_RIN,
-        WING_ROUT
-
-    Returns
-    -------
-    wing: WingModel
-        The tapered model
-    """
-    from .wing import WingModel
-
-    return WingModel(wing.r, wing.T * wing_taper(wing.r, rin, rout))
-
-
 def core_amplitudes(image, good, x, y, G, wing, rap):
     """
     Measure each star's wing amplitude from its core.
@@ -155,7 +130,7 @@ def subtract_faint_wings(image, gaia, x, y, wing, gsub, good=None,
     Subtract the predicted wings of the stars below the census depth.
 
     The on-image stars with gsub <= G < WING_GMAX, with the core
-    tapered away (wing_only), in place; nothing when WING_GMAX is None.
+    tapered away (wing_taper), in place; nothing when WING_GMAX is None.
     The amplitude is the prediction (1, as for the pinned census
     stars), or with WING_CORE_RAP set each star's own from its core
     (core_amplitudes).
@@ -285,7 +260,9 @@ def handle_stars_joint(deep_coadd, wcs, gaia, wing, gsub=None,
     Returns
     -------
     starmask, star_table, dstar, fit:
-        The bool star mask, the census table with the fitted
+        The bool star mask (the circles alone; the caller applies
+        the taper and masks dstar < census.APOD_STARS, see the
+        census module), the census table with the fitted
         amplitudes in 'A' (1 = the prediction), the distance
         transform off the mask, and the fit dict: the census
         (stars), A, free, nodes, node_values, spacing, prior, gfit,

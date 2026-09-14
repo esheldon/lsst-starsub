@@ -7,7 +7,6 @@ profile inside the junction, the two-power-law halo beyond) into
 wing, with optional per-star amplitudes.  The canonical wing per
 band is the median over visits of k_in T(r)
 """
-import os
 
 import numpy as np
 
@@ -25,10 +24,6 @@ RENDER_BLOCK = 256
 # (extend_template_halo's r_blend, r_join)
 R_BLEND = 40.0
 R_JOIN = 44.0
-
-
-def template_path(template_dir, visit, band):
-    return os.path.join(template_dir, f'template-{int(visit)}-{band}.fits')
 
 
 def radial_template(tmpl):

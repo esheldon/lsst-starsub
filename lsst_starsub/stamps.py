@@ -1583,10 +1583,12 @@ def handle_stars(
     Returns
     -------
     starmask, star_table, dstar:
-        The bool star mask, the census table with fitted
-        amplitudes (None when not subtracting), and the
-        distance transform off the mask (for the background
-        margin and the taper)
+        The bool star mask (the circles alone, not apodized), the
+        census table with fitted amplitudes (None when not
+        subtracting), and the distance transform off the mask, for
+        the background margin and the taper.  The caller applies the
+        taper (census.apply_star_taper, APOD_STARS) and masks the
+        attenuation zone dstar < APOD_STARS; see the census module
     """
     from scipy import ndimage
 

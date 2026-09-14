@@ -33,10 +33,9 @@ import numpy as np
 from .census import build_star_mask, field_segmentation, select_stars
 from .profiles import R_MIN, measure_profiles
 from .stamps import (
-    AUR_GMAX, AUR_SLOPE_MAX, AUR_SLOPE_MIN, AUR_SLOPE_SEP, CANON,
-    HALO_SLOPE, TMPL_HALF, TMPL_OUT_MAX, denoise_template,
-    extend_template_halo, fit_halo_slope, measure_coadd_fwhm,
-    select_template_stars,
+    AUR_GMAX, AUR_SLOPE_SEP, CANON, HALO_SLOPE, TMPL_HALF, TMPL_OUT_MAX,
+    denoise_template, extend_template_halo, fit_halo_slope,
+    measure_coadd_fwhm, select_template_stars,
 )
 from .visit import (
     GSUB, WIDE_BW, WIDE_GMAX, build_wide_star_mask, restore_background,
@@ -54,7 +53,6 @@ NBIN_WING = 30
 # exceed the wing there and only pooling over many visits
 # averages them out; the far cloud is kept for that
 AUR_RMIN = 40.0
-AUR_RMAX_FIT = 250.0
 AUR_MIN_COUNT = 10
 # G bins of the cloud diagnostics
 CLOUD_GBINS = [(6.0, 10.0), (10.0, 12.0), (12.0, 13.5), (13.5, 15.5)]
@@ -255,56 +253,6 @@ def cloud_table(wing, edges, gbins=CLOUD_GBINS):
         ('glo', 'f4'), ('ghi', 'f4'), ('rmid', 'f4'), ('med', 'f4'),
         ('err', 'f4'), ('count', 'i4'), ('model', 'f4'),
     ])
-
-
-def fit_pooled_aureole(cloud, slope, ln_a, rmin=AUR_RMIN,
-                       rmax=AUR_RMAX_FIT, min_count=AUR_MIN_COUNT):
-    """
-    one power law for the aureole, fit jointly with the inner
-    law's scale on the per-G-bin cloud points between rmin and
-    rmax, weighted by their errors:
-
-        med(r) = k_in [a_in r^slope + b r^s]
-
-    The slope scan is bounded AUR_SLOPE_SEP flatter than the
-    inner wing as in lsst_starsub.stamps.fit_aureole
-
-    Returns
-    -------
-    dict with aur_slope, aur_amp (b, template units), k_in (nJy
-    per unit gaia flux per template unit), chi2, npt
-    """
-    a_in = float(np.exp(ln_a))
-    usable = (
-        (cloud['glo'] >= 0) & np.isfinite(cloud['med'])
-        & np.isfinite(cloud['err']) & (cloud['err'] > 0)
-        & (cloud['count'] >= min_count)
-        & (cloud['rmid'] >= rmin) & (cloud['rmid'] <= rmax)
-    )
-    if usable.sum() < 3:
-        raise RuntimeError(
-            f'aureole fit: only {usable.sum()} usable cloud points'
-        )
-    r = cloud['rmid'][usable].astype('f8')
-    m = cloud['med'][usable].astype('f8')
-    w = 1.0 / cloud['err'][usable].astype('f8')
-    lo = max(AUR_SLOPE_MIN, slope + AUR_SLOPE_SEP)
-    best = None
-    for s in np.arange(lo, AUR_SLOPE_MAX + 1e-9, 0.02):
-        basis = np.vstack([a_in * r ** slope, r ** s]).T * w[:, None]
-        coef, *_ = np.linalg.lstsq(basis, m * w, rcond=None)
-        if not coef[0] > 0:
-            continue
-        chi2 = float(np.sum((basis @ coef - m * w) ** 2))
-        if best is None or chi2 < best[0]:
-            best = (chi2, s, coef[0], coef[1])
-    if best is None:
-        raise RuntimeError('aureole fit found no positive inner scale')
-    chi2, s, k_in, bb = best
-    return dict(
-        aur_slope=float(s), aur_amp=float(max(bb, 0.0) / k_in),
-        k_in=float(k_in), chi2=chi2, npt=int(r.size),
-    )
 
 
 def stack_profile_errors(stamps, prof_size):

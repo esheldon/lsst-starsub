@@ -9,6 +9,14 @@ make_star_table and make_starmask_plane are the outputs.  diffuse_mask
 turns the joint fit's diffuse regions into a mask.  Shared by the two
 star routes, the stamp templates (lsst_starsub.stamps) and the joint fit
 (lsst_starsub.starsub).
+
+The apodization is the consumer's job: the star routes return the
+mask circles and the distance transform off them (dstar); whoever
+measures on the image applies apply_star_taper with APOD_STARS and
+treats dstar < APOD_STARS, the attenuation zone, as masked (zero
+weight), after combining the per-band distance fields so every band
+shares one zone, as lsst_mdet.cells.load_coadds_butler does.
+make_starmask_plane records that zone.
 """
 import numpy as np
 
