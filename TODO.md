@@ -837,7 +837,9 @@ template job per detector of the 28 visits, `extracts-{visit}/`).
    `wing.py` is the wing reader; `forward.py` / `forward_check`
    stay as the account of the trough (the simulation uses the DM
    fit), `run_visit` and `stack` as the visit-level diagnostics.
-   The old pipeline chart is kept as `docs/flow-full-forward.dot`;
+   The old pipeline chart was trimmed to its surviving visit-level
+   part, `docs/flow-forward-model.dot` (2026-09-14; the full chart is
+   in git history before then);
    the earlier run outputs under `~/oh/starsub-visits` still read
    with the stack and comparison scripts.
 
