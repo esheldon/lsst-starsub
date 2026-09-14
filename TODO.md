@@ -323,7 +323,12 @@ template job per detector of the 28 visits, `extracts-{visit}/`).
   (aureole slope at its bound, tiny amplitude) while the physical
   wing, 1.26 x 10^4 at 300 px, is normal.
 
-## Steps
+## History
+
+The steps as planned on 2026-09-07 and how each ended; all are
+complete (2026-09-14).  The production route is the joint fit
+(7c-7k), described in `docs/flow-joint.dot`; the forward model of
+the visit polynomial is kept as `docs/flow-forward-model.dot`.
 
 1. **Restore the polynomial at the coadd level.**  DONE (see status
    above).  The statistical restoration stays as the deep-field method
@@ -1089,14 +1094,21 @@ template job per detector of the 28 visits, `extracts-{visit}/`).
    the way: `lsst-mdet-getimages --starsub-method joint` fails on the
    g band, which has no wing file (the reference used r for g).
 
-8. **Integration and validation.**  The per-input response is
-   computed once per visit-detector (~40 s on slurm) and stored as a
-   small coarse array; the coadd stage sums stored arrays per cell;
-   lsst-mdet reads the result.  Validate with the dual-state stack on
-   the final images in all bands (only i so far), the injection test
-   above, then metadetection on cleaned patches versus the current
-   product (star-galaxy correlations).  Check DP2 at NERSC with
-   `lsst-starsub-check-datasets`.
+8. **Integration and validation.**  DONE, not as planned: the
+   stored per-input response and its coadd were replaced by the joint
+   fit, which lsst-mdet runs per patch and band inside the
+   metadetection job (7f, `--starsub-method joint`), with the faint-star
+   wings (G 19-21) subtracted and the cirrus regions masked
+   (run-dp2-test-nearstar-inject, run-dp2-test-cirrus-check,
+   2026-09-12/13).  Validated by the ideal simulation (7b), the object
+   injection tests near cirrus and near faint stars, and the 600-patch
+   runs against the template control (run-dp2-test-joint3/4,
+   2026-09-12/13): shear sample +12 percent, star gamma_t consistent
+   with zero beyond 0.3 arcmin, the source-count excess near G 18-21
+   stars gone.  DP2 at NERSC checked with `lsst-starsub-check-datasets`.
+   Remaining: the +2 percent flux excess just outside the census
+   masks (wing shape or mask edge, not the amplitudes) and the
+   full-footprint run.
 
 Option 2 (pre-subtract on visits and recoadd) is no longer needed as
 a fallback: step 1 showed the trough is removable on the existing
