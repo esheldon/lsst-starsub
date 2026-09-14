@@ -1,12 +1,13 @@
-# core
+# core (conda-forge or PyPI; ngmix and rustfits are conda-forge)
 numpy
 scipy
 matplotlib
 sep
+ngmix
 rustfits
-# the coadd star-subtraction machinery (install from source,
-# ~/git/lsst-mdet: pip install -e .)
-#   lsst_mdet
+# the Gaia tools (lsst-starsub-make-gaia, the visit Gaia files)
+astropy
 # The LSST science pipelines are required for the butler loaders
-# (lsst_starsub.visit.load_visit_exposure and the cli); the rest of
-# the package works without them
+# (lsst_starsub.visit.exposure, lsst_starsub.coadd.cellcoadd) and the
+# command line; the rest of the package, and the tests, work without
+# them.  Nothing is required from lsst_mdet, which calls this package
