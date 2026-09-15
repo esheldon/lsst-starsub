@@ -104,3 +104,74 @@ def test_joint_fit_returns_diffuse(monkeypatch):
     jf = jmod.joint_fit(img, good, stars, canonical, 1.0, spacing=128,
                         verbose=False)
     assert not jf['diffuse'].any()
+
+
+def _edge_setup():
+    """a star just off the right edge with its inner wing on the image"""
+    n, spacing = 512, 128
+    rng = np.random.RandomState(7)
+    r = np.arange(200.0)
+    canonical = (r, 5e6 * (1.0 + r / 3.0) ** -2.5)
+    stars = np.zeros(2, dtype=[('x', 'f8'), ('y', 'f8'), ('G', 'f4')])
+    stars['x'] = [200.0, n + 20.0]
+    stars['y'] = [250.0, 300.0]
+    stars['G'] = [15.0, 11.0]
+    truth = np.array([1.0, 1.4])
+    image = (0.5 + rng.normal(size=(n, n))
+             + render_canonical_stars((n, n), stars, canonical, gsub=99.0,
+                                      amps=truth, verbose=False))
+    good = np.ones((n, n), dtype=bool)
+    # the stars' cores are masked
+    yy, xx = np.mgrid[0:n, 0:n]
+    for st in stars:
+        good &= np.hypot(yy - st['y'], xx - st['x']) > 12
+    return image, good, stars, canonical, spacing, truth
+
+
+def test_edge_star_free_margin():
+    image, good, stars, canonical, spacing, truth = _edge_setup()
+    # default: the off-image star is pinned to the prediction
+    jf = jmod.joint_fit(image, good, stars, canonical, 1.0,
+                        spacing=spacing, verbose=False)
+    assert jf['free'].tolist() == [True, False]
+    assert jf['A'][1] == 1.0 and not np.isfinite(jf['A_err'][1])
+    assert np.isfinite(jf['A_err'][0]) and jf['A_err'][0] > 0
+    # within the margin the edge star is fit and recovers its amplitude
+    jf = jmod.joint_fit(image, good, stars, canonical, 1.0,
+                        spacing=spacing, free_margin=50.0, verbose=False)
+    assert jf['free'].tolist() == [True, True]
+    assert abs(jf['A'][1] - truth[1]) < 5 * jf['A_err'][1]
+    assert abs(jf['A'][1] - truth[1]) < 0.1
+
+
+def test_fixed_amplitudes():
+    image, good, stars, canonical, spacing, truth = _edge_setup()
+    # pass 2: every star pinned to a given amplitude, the sky alone fit
+    jf = jmod.joint_fit(image, good, stars, canonical, 1.0,
+                        spacing=spacing, gfit=-np.inf, amps=truth,
+                        verbose=False)
+    assert not jf['free'].any()
+    assert np.array_equal(jf['A'], truth)
+    resid = image - jf['sky'] - jf['star_model']
+    # the wing of the edge star is gone: the band 20-60 px inside the
+    # edge along its row is flat to the noise
+    band = resid[280:320, 452:492]
+    assert abs(band.mean()) < 0.1
+    # with amps the free star's prior is centered there; the faint
+    # star is weakly constrained and lands within its error
+    jf2 = jmod.joint_fit(image, good, stars, canonical, 1.0,
+                         spacing=spacing, amps=truth, verbose=False)
+    assert jf2['free'].tolist() == [True, False]
+    assert abs(jf2['A'][0] - truth[0]) < 3 * jf2['A_err'][0]
+    assert jf2['A'][1] == truth[1]
+
+
+def test_free_override():
+    image, good, stars, canonical, spacing, truth = _edge_setup()
+    # the on-image star pinned at its amplitude, the edge star free
+    jf = jmod.joint_fit(image, good, stars, canonical, 1.0,
+                        spacing=spacing, amps=truth,
+                        free=np.array([False, True]), verbose=False)
+    assert jf['free'].tolist() == [False, True]
+    assert jf['A'][0] == truth[0] and not np.isfinite(jf['A_err'][0])
+    assert abs(jf['A'][1] - truth[1]) < 0.1

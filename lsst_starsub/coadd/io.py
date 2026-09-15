@@ -113,7 +113,7 @@ def write_visit_file(
 
 def write_profiles_file(
     fname, dedges, dtable, meta, star_table=None,
-    rtable=None,
+    rtable=None, extra=None,
 ):
     """
     Write the small per-detector output: the profiles alone.
@@ -136,6 +136,9 @@ def write_profiles_file(
         The census with amplitudes
     rtable: (edges, ptable), optional
         The radial profile edges and table
+    extra: dict, optional
+        extname -> structured array, further tables written after
+        the rest (e.g. the joint fit's sky nodes)
     """
     import rustfits
 
@@ -156,6 +159,9 @@ def write_profiles_file(
             edges_t = np.zeros(1, dtype=[('edges', 'f8', edges.size)])
             edges_t['edges'][0] = edges
             fits.write_table(edges_t, extname='edges')
+        if extra is not None:
+            for name, table in extra.items():
+                fits.write_table(table, extname=name)
 
 
 def _meta_table(meta):

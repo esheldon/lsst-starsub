@@ -646,6 +646,9 @@ def joint_fit(
     variance=None,
     prior_sigma=PRIOR_SIGMA,
     detect_settings=None,
+    free_margin=None,
+    amps=None,
+    free=None,
     verbose=True,
 ):
     """
@@ -695,14 +698,30 @@ def joint_fit(
     detect_settings: dict, optional
         The detection settings of the source segmentation
         (deep_segmentation); default DETECT_SETTINGS
+    free_margin: float or array, optional
+        Stars brighter than gfit whose center is within this many px
+        outside the image are fit as well, one value or one per
+        census star (e.g. a multiple of the mask radius, so the
+        stars across a detector edge with inner wing on the image
+        get their own amplitude); default 0, on-image stars only
+    amps: array, optional
+        Per census star, the amplitude the pinned stars take and the
+        center of the free stars' prior; default 1, the prediction.
+        With gfit below every star this is a sky-only fit at fixed
+        amplitudes
+    free: bool array, optional
+        Per census star, fit its amplitude; replaces the gfit and
+        free_margin selection (a star without cells is still pinned)
     verbose: bool, optional
         Print the per-pass summaries
 
     Returns
     -------
     result: dict
-        A (per census star; 1 where pinned), free (bool per star),
-        sky (full res), star_model (full res), nodes, node_values,
+        A (per census star; the amps value where pinned), A_err (1
+        sigma of the free amplitudes, priors included; nan where
+        pinned), free (bool per star), sky (full res), star_model
+        (full res), nodes, node_values,
         node_err (their 1 sigma, priors included), ncell, chi2 (per
         cell), diffuse (full res bool: the large diffuse segments the
         last segmentation left to the sky fit; none with
@@ -720,10 +739,27 @@ def joint_fit(
 
     x, y, G = stars['x'], stars['y'], stars['G'].astype('f8')
 
-    on = (x >= 0) & (x < nx) & (y >= 0) & (y < ny)
+    # the free stars: bright enough, and on the image or within the
+    # margin of it
+    m = np.zeros(stars.size) if free_margin is None else \
+        np.broadcast_to(np.asarray(free_margin, dtype='f8'), (stars.size,))
+    near = (x >= -m) & (x < nx + m) & (y >= -m) & (y < ny + m)
 
-    free = on & (G < gfit)
+    if free is None:
+        free = near & (G < gfit)
+    else:
+        free = np.array(free, dtype=bool)
+        if free.shape != (stars.size,):
+            raise ValueError('free must have one value per census star')
     nfree = int(free.sum())
+
+    # the pinned amplitudes and the prior centers
+    if amps is None:
+        prior_center = np.ones(stars.size)
+    else:
+        prior_center = np.array(amps, dtype='f8')
+        if prior_center.shape != (stars.size,):
+            raise ValueError('amps must have one value per census star')
 
     # free stars need cells to be fit on: those whose window holds
     # no good cell (inside masks or no-data regions) are pinned as
@@ -748,13 +784,14 @@ def joint_fit(
             free[si] = False
     nfree = int(free.sum())
 
-    # the pinned stars' prediction, subtracted from the data
+    # the pinned stars' model, subtracted from the data
     pinned = stars[~free]
     if pinned.size:
         work = render_canonical_stars(
             image.shape,
             pinned,
             canonical,
+            amps=prior_center[~free],
         )
         np.subtract(image, work, out=work)
     else:
@@ -778,10 +815,15 @@ def joint_fit(
         cols.append(np.full(idx.size, k))
         vals.append(v)
 
-    P = sparse.csc_matrix(
-        (np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))),
-        shape=(ncell, nfree),
-    )
+    if nfree > 0:
+        P = sparse.csc_matrix(
+            (np.concatenate(vals),
+             (np.concatenate(rows), np.concatenate(cols))),
+            shape=(ncell, nfree),
+        )
+    else:
+        # a sky-only fit (every star pinned)
+        P = sparse.csc_matrix((ncell, 0))
 
     H, nodes = mesh_columns(cy, cx, image.shape, spacing)
     X = sparse.hstack([P, H]).tocsr()
@@ -799,7 +841,7 @@ def joint_fit(
     # the good pixels
     seg_excl = np.zeros(image.shape, dtype=bool)
     diffuse = np.zeros(image.shape, dtype=bool)
-    A = np.ones(stars.size)
+    A = prior_center.copy()
 
     for ipass in range(npass):
         ok = good & ~seg_excl
@@ -827,7 +869,10 @@ def joint_fit(
         # own information (a star losing its cells to the pass-2
         # segmentation would otherwise make F singular)
 
-        F[:nfree, :nfree] += np.eye(nfree) * 1e-9 * np.diag(F)[:nfree].max()
+        if nfree > 0:
+            F[:nfree, :nfree] += (
+                np.eye(nfree) * 1e-9 * np.diag(F)[:nfree].max()
+            )
 
         if prior_sigma is not None:
             # the prior in the data term's units: F = X^T W X with
@@ -836,7 +881,7 @@ def joint_fit(
             # 1/prior_sigma^2 enters times sky_sigma^2
             pw = sky_sigma**2 / prior_sigma**2
             F[:nfree, :nfree] += np.eye(nfree) * pw
-            rhs[:nfree] += pw
+            rhs[:nfree] += pw * prior_center[free]
 
         sol = np.linalg.solve(F, rhs)
         A[free] = sol[:nfree]
@@ -899,8 +944,10 @@ def joint_fit(
     # (white noise: the coadd's correlated noise makes them lower
     # bounds)
 
-    cov = np.diag(np.linalg.inv(F))[nfree:]
-    node_err = sky_sigma * np.sqrt(np.maximum(cov, 0.0))
+    cov = np.diag(np.linalg.inv(F))
+    node_err = sky_sigma * np.sqrt(np.maximum(cov[nfree:], 0.0))
+    A_err = np.full(stars.size, np.nan)
+    A_err[free] = sky_sigma * np.sqrt(np.maximum(cov[:nfree], 0.0))
     sky_full = render_mesh(nodes, node_values, image.shape)
 
     model_full = render_canonical_stars(
@@ -913,6 +960,7 @@ def joint_fit(
 
     return dict(
         A=A,
+        A_err=A_err,
         free=free,
         sky=sky_full,
         star_model=model_full,

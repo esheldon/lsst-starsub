@@ -55,3 +55,37 @@ def radial_template(tmpl):
     T[r >= R_JOIN] = halo[r >= R_JOIN]
 
     return r, T
+
+
+def visit_wing(tmpl, canonical):
+    """
+    Build a visit's own wing: its stack inside the junction, the canonical
+    beyond.
+
+    The pooled stack of the visit's unsaturated stars gives the core and
+    inner wing at that visit's seeing, in nJy per unit Gaia flux through
+    the pooled zero point k_in; the far wing is the instrumental
+    scattering, stable from visit to visit and better known from the
+    survey median.  Blended over R_BLEND-R_JOIN as radial_template blends
+    the stack into the halo law.
+
+    Parameters
+    ----------
+    tmpl: dict
+        From lsst_starsub.visit.template.read_template_file
+    canonical: WingModel or (r, T)
+        The band's canonical wing
+
+    Returns
+    -------
+    wing: WingModel
+        On the canonical's radial grid
+    """
+    from ..wing import WingModel, profile_of
+
+    rc, Tc = profile_of(canonical)
+    r, T = radial_template(tmpl)
+    k_in = float(tmpl['params']['k_in'])
+    Tv = k_in * np.interp(rc, r, T)
+    frac = np.clip((rc - R_BLEND) / (R_JOIN - R_BLEND), 0.0, 1.0)
+    return WingModel(rc, (1.0 - frac) * Tv + frac * Tc)

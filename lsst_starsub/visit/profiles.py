@@ -256,7 +256,7 @@ LOCAL_REF = (500.0, 600.0)   # d - r_mask range of the local reference
 def measure_profiles(
     states, vexp, stars, seg, gmax=17.0, mode='r',
     ambient=None, wide=True, local_ref=LOCAL_REF,
-    edges=None, gmin=None, good=None,
+    edges=None, gmin=None, good=None, on_image_only=True,
 ):
     """
     Measure the per-star profiles on every image state.
@@ -287,6 +287,10 @@ def measure_profiles(
     good: bool array, optional
         Overrides vexp.good as the usable-pixel mask (e.g. with a
         detection mask applied, the star's own features included)
+    on_image_only: bool, optional
+        Measure only the stars on the image; False also measures
+        the intruders whose window reaches in (the annuli then hold
+        the part of the wing on the image)
     ambient: dict, optional
         name -> level subtracted from each state before the
         measurement (ambient_levels)
@@ -333,7 +337,7 @@ def measure_profiles(
     rows = []
 
     for si, st in enumerate(stars):
-        if not st['on_image'] or float(st['G']) >= gmax:
+        if (on_image_only and not st['on_image']) or float(st['G']) >= gmax:
             continue
         if gmin is not None and float(st['G']) < gmin:
             continue

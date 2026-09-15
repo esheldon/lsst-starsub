@@ -82,10 +82,10 @@ def core_amplitudes(image, good, x, y, G, wing, rap):
     """
     Measure each star's wing amplitude from its core.
 
-    The flux in the pixels within rap px of the star over the model's
-    flux in the same pixels at amplitude 1 (the Gaia prediction).  1
-    where the aperture leaves the image or holds a pixel that is not
-    good, or where the ratio falls outside WING_AMP_RANGE.
+    lsst_starsub.wing.core_amplitudes with the WING_AMP_RANGE guard:
+    the flux within rap px over the model's, 1 where the aperture
+    leaves the image or holds a pixel that is not good, or where the
+    ratio falls outside WING_AMP_RANGE.
 
     Parameters
     ----------
@@ -105,33 +105,10 @@ def core_amplitudes(image, good, x, y, G, wing, rap):
     amps: array
         The amplitudes, 1 the prediction
     """
+    from ..wing import core_amplitudes as measure
 
-    ny, nx = image.shape
-
-    m = int(np.ceil(rap)) + 1
-    amps = np.ones(len(x))
-
-    for k, (xk, yk, gk) in enumerate(zip(x, y, G)):
-        ix, iy = int(round(xk)), int(round(yk))
-
-        if ix - m < 0 or iy - m < 0 or ix + m >= nx or iy + m >= ny:
-            continue
-
-        sl = np.s_[iy - m:iy + m + 1, ix - m:ix + m + 1]
-        yy, xx = np.mgrid[iy - m:iy + m + 1, ix - m:ix + m + 1]
-        rr = np.hypot(xx - xk, yy - yk)
-        ap = rr <= rap
-
-        if not good[sl][ap].all():
-            continue
-
-        r, T = wing.profile(float(gk))
-        model = 10.0 ** (-0.4 * gk) * np.interp(rr[ap], r, T).sum()
-        a = image[sl][ap].sum() / model
-
-        if WING_AMP_RANGE[0] <= a <= WING_AMP_RANGE[1]:
-            amps[k] = a
-
+    amps, _, _ = measure(image, good, x, y, G, wing, rap,
+                         amp_range=WING_AMP_RANGE)
     return amps
 
 
@@ -363,6 +340,7 @@ def handle_stars_joint(
     fit = dict(
         stars=stars,
         A=jf['A'],
+        A_err=jf['A_err'],
         free=jf['free'],
         nodes=jf['nodes'],
         node_values=jf['node_values'],

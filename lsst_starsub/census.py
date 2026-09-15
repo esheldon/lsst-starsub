@@ -80,15 +80,16 @@ def circle_radius(gmag):
     )
 
 
-def select_stars(gaia, x, y, mask0, gsub=GSUB, verbose=True):
+def select_stars(gaia, x, y, mask0, gsub=GSUB, verbose=True,
+                 intruder_gmax=None, intruder_margin=None):
     """
     Select the census: on-patch stars saturated or brighter than gsub.
 
-    Off-patch stars brighter than GSAT within STAR_MARGIN px of the
-    image, whose wings reach in, are included as intruders.  No RUWE
-    guard: Gaia at these depths is essentially pure point sources, and
-    high-RUWE binaries are still stars we want gone.  Referred to as
-    "the subtract-and-mask census" in various places.
+    Off-patch stars brighter than intruder_gmax within intruder_margin
+    px of the image, whose wings reach in, are included as intruders.
+    No RUWE guard: Gaia at these depths is essentially pure point
+    sources, and high-RUWE binaries are still stars we want gone.
+    Referred to as "the subtract-and-mask census" in various places.
 
     Parameters
     ----------
@@ -103,6 +104,13 @@ def select_stars(gaia, x, y, mask0, gsub=GSUB, verbose=True):
         this are included
     verbose: bool, optional
         Print the census counts
+    intruder_gmax: float, optional
+        Off-image stars brighter than this are intruders; default
+        GSAT
+    intruder_margin: float or callable, optional
+        Intruders within this many px of the image; a callable is
+        given the star's G and returns the margin, so the wings can
+        set it (e.g. a multiple of circle_radius).  Default STAR_MARGIN
 
     Returns
     -------
@@ -110,6 +118,10 @@ def select_stars(gaia, x, y, mask0, gsub=GSUB, verbose=True):
         Fields ra, dec, x, y, G, ruwe, is_sat, on_image,
         sorted brightest first
     """
+    if intruder_gmax is None:
+        intruder_gmax = GSAT
+    if intruder_margin is None:
+        intruder_margin = STAR_MARGIN
 
     ny, nx = mask0.shape
     sat = (mask0 & DM_SAT) != 0
@@ -136,10 +148,14 @@ def select_stars(gaia, x, y, mask0, gsub=GSUB, verbose=True):
                 continue
         else:
             is_sat = 0
-            if gmag >= GSAT:
+            if gmag >= intruder_gmax:
                 continue
-            if not (-STAR_MARGIN < ix < nx + STAR_MARGIN
-                    and -STAR_MARGIN < iy < ny + STAR_MARGIN):
+            if callable(intruder_margin):
+                margin = float(intruder_margin(gmag))
+            else:
+                margin = float(intruder_margin)
+            if not (-margin < ix < nx + margin
+                    and -margin < iy < ny + margin):
                 continue
 
         rows.append((
@@ -161,7 +177,8 @@ def select_stars(gaia, x, y, mask0, gsub=GSUB, verbose=True):
     return stars
 
 
-def patch_census(gaia, wcs, bbox, mask0, gsub=GSUB, coadd=False, verbose=True):
+def patch_census(gaia, wcs, bbox, mask0, gsub=GSUB, coadd=False, verbose=True,
+                 intruder_gmax=None, intruder_margin=None):
     """
     Make the census and its masks for one image, the routes' preamble.
 
@@ -181,6 +198,8 @@ def patch_census(gaia, wcs, bbox, mask0, gsub=GSUB, coadd=False, verbose=True):
         See build_star_mask
     verbose: bool, optional
         Print the census and masked fraction
+    intruder_gmax, intruder_margin: optional
+        The off-image intruder rule, see select_stars
 
     Returns
     -------
@@ -194,7 +213,10 @@ def patch_census(gaia, wcs, bbox, mask0, gsub=GSUB, coadd=False, verbose=True):
 
     x, y = gaia_pixel_positions(gaia, wcs, bbox)
 
-    stars = select_stars(gaia, x, y, mask0, gsub=gsub, verbose=verbose)
+    stars = select_stars(
+        gaia, x, y, mask0, gsub=gsub, verbose=verbose,
+        intruder_gmax=intruder_gmax, intruder_margin=intruder_margin,
+    )
 
     starmask, comps = build_star_mask(
         stars, mask0, verbose=verbose,

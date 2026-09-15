@@ -8,6 +8,8 @@ per-visit Gaia extract is made in --gaia-dir on first use
 (gaia-dr3-visit-{visit}.fits, from the refcat shards)
 """
 import os
+
+from ..visit.exposure import visit_detectors as exposure_visit_detectors
 import sys
 import time
 
@@ -58,31 +60,6 @@ def get_args():
              'instead of extracting (no butler access)',
     )
     return parser.parse_args()
-
-
-def visit_detectors(butler, visit):
-    """
-    List the detectors of a visit with a wcs and a calibration.
-
-    Parameters
-    ----------
-    butler: lsst.daf.butler.Butler
-    visit: int
-
-    Returns
-    -------
-    detectors: list of int
-        Sorted
-    """
-    from ..site import INSTRUMENT
-
-    cat = butler.get(
-        'visit_summary', dataId=dict(instrument=INSTRUMENT, visit=visit),
-    )
-    return sorted(
-        int(rec['id']) for rec in cat
-        if rec.getWcs() is not None and rec.getPhotoCalib() is not None
-    )
 
 
 def extract_one(butler, visit, detector, gaia_path):
@@ -218,7 +195,7 @@ def main():
     butler = make_visit_butler(args.repo, args.collection)
 
     gaia_path = ensure_visit_gaia_file(butler, visit, args.gaia_dir)
-    dets = args.detectors or visit_detectors(butler, visit)
+    dets = args.detectors or exposure_visit_detectors(butler, visit)
     if args.ndet is not None and args.ndet < len(dets):
         idx = np.unique(np.round(
             np.linspace(0, len(dets) - 1, args.ndet)

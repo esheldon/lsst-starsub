@@ -151,3 +151,111 @@ def test_star_model_image():
     model = star_model_image((10, 10), slist)
     assert model[0, 0] == 2.0
     assert model[6, 6] == 0.0
+
+
+def test_core_amplitudes_and_visit_wing():
+    from lsst_starsub.wing import WingModel, core_amplitudes
+    from lsst_starsub.visit.trough import R_BLEND, R_JOIN, visit_wing
+
+    # a star with a known amplitude on a flat noisy image
+    rng = np.random.default_rng(5)
+    n = 128
+    r = np.arange(0.0, 3000.0, 0.5)
+    T = 2.0e8 * (1.0 + r / 2.0) ** -3.0
+    wing = WingModel(r, T)
+    G = 16.0
+    yy, xx = np.mgrid[0:n, 0:n]
+    rr = np.hypot(yy - 64.3, xx - 63.6)
+    image = 1.7 * 10 ** (-0.4 * G) * np.interp(rr, r, T)
+    image += rng.normal(size=(n, n))
+    good = np.ones((n, n), dtype=bool)
+    amps, errs, ok = core_amplitudes(
+        image, good, np.array([63.6, 5.0]), np.array([64.3, 64.0]),
+        np.array([G, G]), wing, 5.0, amp_range=(0.25, 4.0), sky_sigma=1.0,
+    )
+    assert ok.tolist() == [True, False]
+    assert abs(amps[0] - 1.7) < 5 * errs[0] and abs(amps[0] - 1.7) < 0.05
+    assert amps[1] == 1.0 and not np.isfinite(errs[1])
+
+    # the visit wing: the stack inside the junction, the canonical
+    # beyond, blended between
+    prof = np.exp(-np.arange(72.0) / 5.0)
+    tmpl = dict(
+        prof=prof,
+        params=dict(k_in=3.0, slope=-3.0, ln_a=0.0, aur_slope=-2.0,
+                    aur_amp=0.0),
+    )
+    canonical = WingModel(r, T)
+    vw = visit_wing(tmpl, canonical)
+    assert np.allclose(vw.r, r)
+    inside = r < R_BLEND
+    assert np.allclose(vw.T[inside], 3.0 * np.interp(r[inside],
+                                                     np.arange(72.0), prof))
+    beyond = r >= R_JOIN
+    assert np.allclose(vw.T[beyond], T[beyond])
+
+
+def test_flag_dead_pixels():
+    from lsst_starsub.visit.exposure import flag_dead_pixels
+
+    var = np.full((64, 64), 100.0, dtype='f4')
+    var[:32, :16] = 3.0          # a dead block
+    var[5, 40] = np.nan          # a bad pixel stays as it is
+    mask = np.zeros((64, 64, 1), dtype='i4')
+    n = flag_dead_pixels(mask, var)
+    assert n == 32 * 16
+    assert (mask[:32, :16, 0] & DM_NO_DATA).all()
+    assert not (mask[32:, :, 0] & DM_NO_DATA).any()
+    assert mask[5, 40, 0] == 0
+
+
+def test_detector_core_stack():
+    from lsst_starsub.visit.exposure import (
+        CORE_STACK_MIN, detector_core_stack,
+    )
+    from lsst_starsub.wing import core_amplitudes
+
+    # 30 stars of one gaussian core, per unit Gaia flux 1e9 at the
+    # peak, with amplitudes 0.8-1.2 about 1, on a flat noisy image
+    rng = np.random.default_rng(11)
+    vexp = make_vexp(dim=512, sky=0.0, sigma=2.0)
+    vexp.backgrounds['initial_coarse'][:] = 0.0
+    vexp.backgrounds['initial_fine'][:] = 0.0
+    n = 30
+    # positions at least 30 px apart, so no aperture holds two stars
+    xs, ys = [], []
+    while len(xs) < n:
+        x, y = rng.uniform(40, 470, 2)
+        if all(np.hypot(x - a, y - b) > 30 for a, b in zip(xs, ys)):
+            xs.append(x)
+            ys.append(y)
+    xs, ys = np.array(xs), np.array(ys)
+    G = rng.uniform(16.0, 18.5, n)
+    truth = rng.uniform(0.8, 1.2, n)
+    yy, xx = np.mgrid[0:512, 0:512]
+    sig = 2.5
+    for x, y, g, a in zip(xs, ys, G, truth):
+        rr2 = (yy - y) ** 2 + (xx - x) ** 2
+        vexp.image.array[:] += (
+            a * 1e9 * 10 ** (-0.4 * g) * np.exp(-0.5 * rr2 / sig ** 2)
+        ).astype('f4')
+    stars = np.zeros(n, dtype=[
+        ('x', 'f8'), ('y', 'f8'), ('G', 'f4'), ('on_image', 'i2'),
+        ('is_sat', 'i2'),
+    ])
+    stars['x'], stars['y'], stars['G'], stars['on_image'] = xs, ys, G, 1
+    assert n >= CORE_STACK_MIN
+    stack, nstar = detector_core_stack(vexp, stars)
+    assert nstar == n
+    half = stack.shape[0] // 2
+    # the stack peaks at the median amplitude, a little below 1e9
+    # for the pixel phases
+    peak = stack[half, half] / 1e9
+    assert 0.9 * np.median(truth) < peak <= np.median(truth) * 1.02
+    amps, errs, ok = core_amplitudes(
+        vexp.image.array, vexp.good, xs, ys, G, stack, 5.0, sky_sigma=2.0,
+    )
+    assert ok.all()
+    # each star's amplitude relative to the median star, to the
+    # pixel-phase scatter of a 5 px aperture
+    assert np.allclose(amps / np.median(truth), truth, rtol=0.03)

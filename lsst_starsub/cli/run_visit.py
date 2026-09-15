@@ -55,6 +55,36 @@ def get_args():
     )
     parser.add_argument('--nround', type=int, default=2)
     parser.add_argument(
+        '--star-model', default='template', choices=['template', 'joint'],
+        help='the star model: the stamp templates of the image '
+             '(default) or the joint fit of the canonical wing and the '
+             'sky mesh, which needs --canonical',
+    )
+    parser.add_argument(
+        '--canonical',
+        help='the canonical wing file of the band for --star-model joint',
+    )
+    parser.add_argument(
+        '--edge-factor', type=float, default=None,
+        help='joint model: also fit the stars across the detector edge '
+             'whose center is within this many mask radii of the image '
+             '(pass 1 of the visit scheme); their profiles are measured '
+             'too',
+    )
+    parser.add_argument(
+        '--amplitudes',
+        help='joint model: pin every star to its amplitude from this '
+             'lsst-starsub-visit-gather file and refit the sky alone '
+             '(pass 2 of the visit scheme)',
+    )
+    parser.add_argument(
+        '--core-rap', type=float, default=None,
+        help='joint model: measure the unsaturated stars\' amplitudes '
+             'from the flux within this many px of their centers and '
+             'pin them; --canonical must then be the visit\'s own wing '
+             '(lsst-starsub-visit-wing)',
+    )
+    parser.add_argument(
         '--no-plot', action='store_true', help='skip the png',
     )
     parser.add_argument(
@@ -94,6 +124,54 @@ def output_name(outdir, tract, patch, band, visit, detector, ext):
     )
 
 
+def joint_outputs(res, meta):
+    """
+    Build the joint model's outputs: the census with errors, the nodes.
+
+    Parameters
+    ----------
+    res: dict
+        From handle_stars_visit with the joint model
+    meta: dict
+        The run meta, extended in place with the fit's settings and
+        quality
+
+    Returns
+    -------
+    star_table: structured array
+        The census table with A, A_err and free
+    extra: dict
+        'nodes': the sky mesh nodes (ix, iy, x, y, value, err)
+    """
+    from numpy.lib import recfunctions as rfn
+
+    jf = res['joint']
+    star_table = rfn.append_fields(
+        res['star_table'], ['A_err', 'free'],
+        [jf['A_err'].astype('f8'), jf['free'].astype('i2')],
+        usemask=False,
+    )
+    xn, yn = jf['nodes']
+    iy, ix = np.mgrid[0:yn.size, 0:xn.size]
+    nodes = np.zeros(ix.size, dtype=[
+        ('ix', 'i2'), ('iy', 'i2'), ('x', 'f4'), ('y', 'f4'),
+        ('value', 'f4'), ('err', 'f4'),
+    ])
+    nodes['ix'] = ix.ravel()
+    nodes['iy'] = iy.ravel()
+    nodes['x'] = xn[ix.ravel()]
+    nodes['y'] = yn[iy.ravel()]
+    nodes['value'] = np.asarray(jf['node_values']).ravel()
+    nodes['err'] = np.asarray(jf['node_err']).ravel()
+    meta.update(
+        spacing=float(xn[1] - xn[0]), nxnode=int(xn.size),
+        nynode=int(yn.size), ny=int(jf['sky'].shape[0]),
+        nx=int(jf['sky'].shape[1]), chi2=float(jf['chi2']),
+        nfree=int(jf['free'].sum()),
+    )
+    return star_table, {'nodes': nodes}
+
+
 def process_one(butler, visit, detector, args, iq_score=np.nan):
     """
     Characterize one visit-detector and write its outputs.
@@ -128,9 +206,24 @@ def process_one(butler, visit, detector, args, iq_score=np.nan):
         vexp, gaia_file=args.gaia_file, gmax=max(args.gsub, 19.0),
     )
 
+    joint = {}
+    if args.star_model == 'joint':
+        from ..wing import read_wing_model
+        if args.canonical is None:
+            raise ValueError('--star-model joint needs --canonical')
+        joint = dict(
+            star_model='joint',
+            canonical=read_wing_model(args.canonical),
+            edge_factor=args.edge_factor,
+            core_rap=args.core_rap,
+        )
+        if args.amplitudes is not None:
+            from ..visit.gather import read_amplitudes
+            joint['amplitudes'] = read_amplitudes(args.amplitudes)
+
     res = handle_stars_visit(
         vexp, gaia, gsub=args.gsub, restore=args.restore,
-        nround=args.nround,
+        nround=args.nround, **joint,
     )
 
     residual = vexp.image.array
@@ -154,12 +247,16 @@ def process_one(butler, visit, detector, args, iq_score=np.nan):
     print('    ambient levels (nJy): ' + ', '.join(
         f'{k} {v:.2f}' for k, v in ambient.items()
     ))
+    # with the edge stars in the fit, their wings on this detector
+    # are measured too
+    on_image_only = args.edge_factor is None
     edges, ptable = measure_profiles(
         states, vexp, res['stars'], seg, ambient=ambient,
+        on_image_only=on_image_only,
     )
     dedges, dtable = measure_profiles(
         states, vexp, res['stars'], seg, ambient=ambient,
-        mode='dmask',
+        mode='dmask', on_image_only=on_image_only,
     )
 
     meta = dict(
@@ -168,7 +265,16 @@ def process_one(butler, visit, detector, args, iq_score=np.nan):
         restore=args.restore, nround=args.nround,
         gsub=args.gsub, collection=args.collection,
         fwhm=res['fwhm'] if res['fwhm'] is not None else -1.0,
+        star_model=args.star_model,
+        edge_factor=-1.0 if args.edge_factor is None else args.edge_factor,
+        amplitudes='' if args.amplitudes is None else args.amplitudes,
+        core_rap=-1.0 if args.core_rap is None else args.core_rap,
+        canonical='' if args.canonical is None else args.canonical,
     )
+    star_table = res['star_table']
+    extra = None
+    if joint:
+        star_table, extra = joint_outputs(res, meta)
     if args.profiles_only:
         from ..coadd.io import write_profiles_file
         stem = os.path.basename(output_name(
@@ -177,8 +283,8 @@ def process_one(butler, visit, detector, args, iq_score=np.nan):
         ))[:-5]
         write_profiles_file(
             os.path.join(args.outdir, f'profiles-{stem}.fits'),
-            dedges, dtable, meta, star_table=res['star_table'],
-            rtable=(edges, ptable),
+            dedges, dtable, meta, star_table=star_table,
+            rtable=(edges, ptable), extra=extra,
         )
         return
 

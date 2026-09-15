@@ -31,3 +31,38 @@ def test_diffuse_mask_none():
     assert diffuse_mask(empty, 20) is None
     # fit dicts from an lsst_starsub without the diffuse region
     assert diffuse_mask({'r': {}}, 20) is None
+
+
+def test_select_stars_intruders():
+    from lsst_starsub.census import (
+        GSAT, STAR_MARGIN, circle_radius, select_stars,
+    )
+
+    n = 400
+    mask0 = np.zeros((n, n), dtype='i4')
+    gaia = np.zeros(4, dtype=[
+        ('ra', 'f8'), ('dec', 'f8'), ('phot_g_mean_mag', 'f8'), ('ruwe', 'f8'),
+    ])
+    gaia['ra'] = [1.0, 1.1, 1.2, 1.3]
+    gaia['dec'] = 0.0
+    gaia['ruwe'] = 1.0
+    # on image; bright just off the edge; G 16 just off the edge;
+    # G 16 far off
+    gaia['phot_g_mean_mag'] = [17.0, 12.0, 16.0, 16.0]
+    x = np.array([100.0, n + 50.0, n + 30.0, n + 150.0])
+    y = np.array([100.0, 100.0, 200.0, 200.0])
+
+    stars = select_stars(gaia, x, y, mask0, gsub=19.0, verbose=False)
+    # the default rule: intruders brighter than GSAT within STAR_MARGIN
+    # (the census is sorted brightest first)
+    assert stars['on_image'].tolist() == [0, 1]
+    assert 50.0 < STAR_MARGIN and 12.0 < GSAT
+
+    stars = select_stars(
+        gaia, x, y, mask0, gsub=19.0, verbose=False, intruder_gmax=17.0,
+        intruder_margin=lambda g: 3 * circle_radius(g),
+    )
+    # 3 mask radii of a G 16 star is 103 px: the one at 30 px is in,
+    # the one at 150 px is out
+    assert stars['on_image'].tolist() == [0, 0, 1]
+    assert sorted(stars['G'][stars['on_image'] == 0].tolist()) == [12.0, 16.0]

@@ -1114,6 +1114,106 @@ Option 2 (pre-subtract on visits and recoadd) is no longer needed as
 a fallback: step 1 showed the trough is removable on the existing
 coadds.
 
+9. **The visit scheme, first experiment** (2026-09-14, visit-plan.md
+   "The passes"; run dir `~/oh/starsub-visits/edge-2025060400354/`,
+   visit 2025060400354 in i, 178 detectors, fwhm 1.15").  Code:
+   `select_stars` takes an intruder rule (gmax, margin as a callable
+   of G); `joint_fit` takes `free_margin` (stars across the edge
+   within it are fit), `amps` (pinned values and prior centers), an
+   explicit `free`, and returns `A_err`; `handle_stars_visit` has the
+   joint model with `edge_factor`, `amplitudes` (pass 2: every star
+   pinned, sky-only fit) and `core_rap`; on a visit the restored image
+   is flattened with the wide-box sky pass first, since the joint
+   fit's segmentation runs on the image minus the star model without
+   its own sky (it masked 100 percent of a 1200 nJy sky otherwise);
+   `lsst-starsub-visit --star-model joint --canonical --edge-factor
+   --amplitudes --core-rap --profiles-only` writes the census with
+   A, A_err, free and the sky nodes beside the profiles;
+   `lsst-starsub-visit-gather` consolidates a visit (best constraint
+   by A_err) and writes `amplitudes-{visit}-{band}.fits` with the
+   cross-detector pairs; `lsst-starsub-visit-wing` builds the visit's
+   own wing (`visit.trough.visit_wing`: the pooled stack inside the
+   44 px junction, the canonical beyond); `scripts/visit_pass_jobs.py`
+   and `scripts/edge_stack.py` drive and stack.  Two variants ran:
+
+   a. Canonical wing, edge stars free (edge factor 3): 40,244 census
+      stars over the visit, 15,553 fit on at least one detector, 606
+      on two.  One visit constrains an amplitude to A_err 0.075 (G
+      6-10), 0.10-0.12 (G 11-13), 0.14-0.20 (G 13-17), against the
+      0.3 prior; the coadd fit on 7275/55 gives 0.033-0.066 for the
+      same G, the ratio 3-3.6 being the sky-sigma ratio 4.0 (26.6 vs
+      6.6 nJy) less the prior's floor: noise, not masking.  Bright
+      amplitudes run high, median 1.13-1.19 at G 10-12 (poor seeing).
+      The cross-detector pairs agree to +0.008 median but 0.31 rms,
+      the second detector prior-limited; the 130 pairs with the
+      better error < 0.15 have rms 0.53 and chi 2.4 (errors low by
+      2x, or the wing differs between detectors; unresolved).  The
+      residual stacks of the edge stars on the neighboring detector
+      (d - r_mask bins of 10 px, 10^-3 sky sigma, single visit):
+      G 6-13 pinned to the prediction +16 +15 +2 -6, consolidated
+      +7 +9 -3 -9 (73 stars, median noise 13); G 13-15 +5 -10 0 +4 vs
+      0 -12 -3 +3 (118 stars, noise 10); G 15-17 no change (158
+      stars); the on-image stars +13 +4 +4 +1 (G 6-13), -1 0 0 0 (G
+      13-15), -5 -4 -2 -2 (G 15-17).  So the consolidation halves the
+      inner residual of the bright edge stars, at the noise of one
+      visit.  Detector 1 (a corner) fails: pass-1 chi2/cell 280,
+      amplitudes +-50-150 (an unmasked feature, under study).
+   b. The visit's own wing with the core amplitudes: the unsaturated
+      on-image stars take their amplitude from the flux within 5 px
+      (`wing.core_amplitudes`, errors 10^-4-10^-3 from the sky
+      noise) and are pinned (free = 2 in the tables); only the
+      saturated and edge stars stay in the fit.  On detector 049: 203
+      of 215 measured, median 0.85 (G 15-16 0.78 with 0.05 scatter, G
+      17-19 0.87 with 0.20, the color term), the bright wing fits
+      0.98.  The pooled template's zero points differ, k_in (the wing
+      cloud) 1.28 x k_stamp (the stamps' cores) on this visit, the
+      same tension from the other side: which normalization A = 1
+      should mean is a calibration convention still to settle; for
+      the faint stars the far wing at stake is 10^-3 sigma.  The
+      full visit (`chain_c.sh`): 39,191 of 40,244 stars constrained,
+      32,048 with A_err < 0.05; the visit's core scale is 0.856 with
+      a per-star half 16-84 range of 0.19 (the color term).  The
+      edge-star stacks are the same as in (a) to 1-2 x 10^-3 sigma
+      (the edge stars are wing-fit in both); the on-image G 15-17
+      stack moves from -5 -4 -2 -2 to -1 -3 -1 -2.  Per detector
+      against the focal-plane radius (0-100, 100-175, 175-250,
+      250-300, 300-400 mm; the field edge is ~320 mm): the core
+      amplitude 0.868, 0.868, 0.853, 0.844, 0.844 (G < 17: 0.825 to
+      0.803), the bright stars' wing-fit amplitude (G < 13.5, err <
+      0.12) 1.089, 1.087, 1.110, 1.097, 1.206, the fwhm 1.13 to 1.22
+      arcsec.  So the wing per unit core light grows ~14 percent from
+      the center to the field edge, the vignetting on the wings the
+      user anticipated; the detector-to-detector rms of the core
+      scale within a ring is 0.023 against 0.014 expected from the
+      per-star scatter, real per-detector structure at 2 percent.
+      Detector 1's dead amplifier C00 (unflagged by DM; reported) is
+      now caught by the loader's variance guard
+      (`visit.exposure.flag_dead_pixels`); its pass-1c run predates
+      the guard (chi2/cell 16.6) and the stacks are medians.
+   c. To keep it simple the heavily vignetted detectors are left out
+      for now: `lsst-starsub-visit-detectors` lists a visit's
+      detectors within `visit.exposure.MAX_FIELD_RADIUS` (300 mm; 23
+      of the 178 are beyond), and the gather and `edge_stack.py`
+      take the list.  On the 155 inner detectors (`gather-inner/`,
+      `edge-stack-c-inner.png`): scale 0.858, the edge-star stacks as
+      before (G 6-13 prediction +19 +16 +3 -4, consolidated +14 +9 -1
+      -8), and the bright cross-detector pairs still disagree, chi
+      rms 2.43 on 115 pairs, so that is not the vignetting: the
+      wing-fit errors of the bright stars are low by ~2x, most likely
+      the wing shape at this visit's seeing (0.90 of the canonical at
+      60-100 px) making the per-star residuals systematic rather than
+      noise.  To look at with a second visit.
+
+   What it says for the plan: a single visit does not constrain the
+   wing amplitudes of stars fainter than G ~13 (the coadd does);
+   the visit product either carries the prediction for them, or their
+   core flux with the visit's own inner profile (b), or gathers their
+   visits together.  Centroiding is not what limits small radii (a
+   centroid error delta biases an amplitude by n^2 delta^2 / 4 r^2,
+   below a percent to the core for delta < 0.2 px, and Gaia plus the
+   visit wcs give 0.05); the profile shape at the visit's seeing is,
+   which the stack supplies.
+
 ## Smaller items
 
 - Profiles: reference each state locally or exclude neighbors to their

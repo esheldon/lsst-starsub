@@ -95,9 +95,38 @@ MASK_INTRP_PLANES = ('INTRP', 'CR')
 # the wide sky pass on the restored image: boxes large enough
 # not to follow the wings, and the stars excluded out to their
 # template extents so the boxes never see them
+# pixels whose variance is below this fraction of the detector median
+# saw no light (a dead amplifier) and are flagged NO_DATA
+DEAD_VAR_FRAC = 0.25
+# mm: detectors whose center lies beyond this focal-plane radius are
+# left out of the visit scheme for now (visit_detectors).  The wings
+# there differ: on visit 2025060400354 the bright stars' wing-fit
+# amplitude against the focal-plane-average wing is 1.09-1.11 inside
+# 300 mm and 1.21 beyond, with the core scale 3 percent lower, the
+# vignetted pupil changing the scattering (TODO step 9).  A field-radius
+# term in the wing is the eventual fix; the field edge is ~320 mm
+MAX_FIELD_RADIUS = 300.0
 WIDE_BW = 256
 WIDE_GMAX = 16.0        # template-extent exclusion for G below
 WIDE_GROW = 24          # circle margin for the fainter stars
+# core amplitudes outside this range (a neighbor in the aperture, a
+# star off its Gaia position) are left to the fit
+CORE_AMP_RANGE = (0.25, 4.0)
+# the detector's own core profile for the core amplitudes: the median of
+# the unsaturated stars' stamps in this G range, each per unit Gaia
+# flux, out to CORE_STACK_HALF px; at least CORE_STACK_MIN stars, else
+# the wing given is used.  The seeing varies across a visit (1.02-1.30
+# arcsec over visit 2025060400354) and a 5 px aperture's enclosed
+# fraction with it, so against the visit's pooled stack the
+# per-detector core scale tracked the local fwhm (correlation -0.85,
+# -0.32 per arcsec); against the detector's own stack it does not
+CORE_STACK_GMIN = 15.5
+CORE_STACK_GMAX = 19.0
+CORE_STACK_HALF = 12
+CORE_STACK_MIN = 20
+# px: a star with another Gaia star closer than this is not measured
+# from its core (the aperture would hold both) and keeps the fit
+CORE_NEIGHBOR = 12.0
 
 # the joint characterization iterates: wide sky, star
 # subtraction, refined sky on the star-free image, star
@@ -125,6 +154,45 @@ def iq_tier(score):
         if (lo is None or score >= lo) and (hi is None or score < hi):
             return name
     return 'unknown'
+
+
+def flag_dead_pixels(mask, variance, frac=None):
+    """
+    Flag the pixels that saw no light as NO_DATA, in place.
+
+    A dead amplifier is not flagged by the pipeline (visit
+    2025060400354 detector 001: a 512 x 2048 px block at -34 ADU with
+    a variance 4 percent of its neighbors', PARTLY_VIGNETTED and
+    nothing else), and the sky fit then chases a 1000 nJy hole.  The
+    variance tells: pixels below frac times the detector's median
+    variance had no sky in them.
+
+    Parameters
+    ----------
+    mask: array (ny, nx, nplane)
+        The converted mask, plane 0 modified
+    variance: array
+        The variance plane
+    frac: float, optional
+        Default DEAD_VAR_FRAC
+
+    Returns
+    -------
+    ndead: int
+        The pixels flagged
+    """
+    if frac is None:
+        frac = DEAD_VAR_FRAC
+    ok = np.isfinite(variance) & (variance > 0)
+    if not ok.any():
+        return 0
+    dead = ok & (variance < frac * np.median(variance[ok]))
+    ndead = int(dead.sum())
+    if ndead > 0:
+        mask[:, :, 0][dead] |= DM_NO_DATA
+        print(f'    {ndead} pixels ({100 * ndead / dead.size:.1f} percent) '
+              f'with variance below {frac:g} x the median flagged NO_DATA')
+    return ndead
 
 
 def convert_mask(mask_array, plane_dict):
@@ -458,6 +526,7 @@ def handle_stars_visit(
     nround=NROUND, grow_bright=None,
     star_model='template', canonical=None,
     joint_spacing=None, joint_prior=None,
+    edge_factor=None, amplitudes=None, core_rap=None,
 ):
     """
     Run the joint star-wing and sky characterization of one detector.
@@ -509,6 +578,27 @@ def handle_stars_visit(
     joint_prior: float, optional
         The amplitude prior width of the joint fit (default
         lsst_starsub.joint.PRIOR_SIGMA)
+    edge_factor: float, optional
+        Joint model only: the stars across the detector edge are
+        in the census and fit as well, those brighter than
+        lsst_starsub.joint.GFIT whose center is within edge_factor
+        mask radii (circle_radius) of the image; default only the
+        stars on the image are fit and the intruders follow the
+        census default (bright, within STAR_MARGIN px)
+    amplitudes: structured array, optional
+        Joint model only: per-star amplitudes (ra, dec, A) from a
+        visit-level consolidation (lsst_starsub.visit.gather); every
+        census star is pinned to its value (1 where absent) and only
+        the sky is fit, the second pass of the visit scheme
+    core_rap: float, optional
+        Joint model only: the unsaturated on-image census stars get
+        their amplitude from the flux within this many px of their
+        center (lsst_starsub.wing.core_amplitudes), measured on the
+        flattened image with the wing given, which must then be the
+        visit's own (lsst_starsub.visit.trough.visit_wing) for the
+        core to be right; those stars are pinned to it and only the
+        saturated and edge stars stay free.  Their table rows carry
+        free = 2
 
     Returns
     -------
@@ -516,14 +606,22 @@ def handle_stars_visit(
         stars, star_table, starmask, dstar, slist, fwhm,
         restored (array added back), sky (total sky model
         subtracted, nJy), star_model (the summed star model),
-        delivered (the image as delivered, copy)
+        delivered (the image as delivered, copy); with the joint
+        model also joint (the joint_fit result, with A_err and free)
     """
     from scipy import ndimage
 
     delivered = vexp.image.array.copy()
     mask0 = vexp.mask.array[:, :, 0]
+    intruders = {}
+    if edge_factor is not None:
+        from ..joint import GFIT
+        intruders = dict(
+            intruder_gmax=GFIT,
+            intruder_margin=lambda gmag: edge_factor * circle_radius(gmag),
+        )
     stars, starmask, comps, dstar, x, y = patch_census(
-        gaia, vexp.wcs, vexp.bbox, mask0, gsub=gsub,
+        gaia, vexp.wcs, vexp.bbox, mask0, gsub=gsub, **intruders,
     )
 
     # the fine-pass exclusion: every mask plus PRE_GROW, and the
@@ -556,19 +654,53 @@ def handle_stars_visit(
         raise ValueError(f'star_model {star_model!r} needs the canonical wing')
 
     if star_model == 'joint':
-        from ..joint import SPACING, joint_fit
+        from ..joint import GFIT, SPACING, joint_fit
+        # the restored image carries the whole sky; the joint fit
+        # segments the sources on the image minus the star model
+        # without its own first-pass sky (see lsst_starsub.joint), so
+        # the coarse wide-box sky pass flattens it first, as on the
+        # coadds the object background does.  The mesh then models
+        # what the boxes left, jointly with the stars
+        sky += sky_background(vexp, exclude=wide, bw=WIDE_BW)
+        extra = dict(gfit=GFIT)
+        if joint_prior is not None:
+            extra['prior_sigma'] = joint_prior
+        if edge_factor is not None:
+            extra['free_margin'] = (
+                edge_factor * circle_radius(stars['G'].astype('f8'))
+            )
+        core_err = None
+        if core_rap is not None and amplitudes is None:
+            core_amps, core_err, core_ok = core_pinned(
+                vexp, stars, canonical, core_rap, edge_factor=edge_factor,
+                neighbors=(x, y),
+            )
+            extra['amps'] = core_amps
+            extra['free'] = core_free(
+                stars, core_ok, vexp.image.array.shape, edge_factor,
+            )
+        if amplitudes is not None:
+            # the second pass: every star at its consolidated
+            # amplitude, the sky alone refit
+            extra['amps'] = match_amplitudes(stars, amplitudes)
+            extra['gfit'] = -np.inf
         jf = joint_fit(
             vexp.image.array, vexp.good & ~starmask, stars, canonical,
             vexp.sky_sigma,
             spacing=SPACING if joint_spacing is None else joint_spacing,
             variance=vexp.variance.array,
-            **({} if joint_prior is None else dict(prior_sigma=joint_prior)),
+            **extra,
         )
         sky += jf['sky']
         star_model_img = jf['star_model']
         vexp.image.array[:, :] -= jf['sky'] + star_model_img
         star_table = make_star_table(stars, [])
         star_table['A'] = jf['A']
+        if core_err is not None:
+            # the core-measured stars are constrained, not free: free
+            # = 2 in the table, their errors from the aperture
+            jf['A_err'] = np.where(core_ok, core_err, jf['A_err'])
+            jf['free'] = np.where(core_ok, 2, jf['free']).astype('i2')
         return dict(
             stars=stars, star_table=star_table, starmask=starmask,
             dstar=dstar, slist=[], restored=restored, sky=sky,
@@ -622,6 +754,283 @@ def handle_stars_visit(
 # ---------------------------------------------------------------
 # butler-facing loaders
 # ---------------------------------------------------------------
+
+def detector_core_stack(vexp, stars, gmin=None, gmax=None, half=None):
+    """
+    Measure the detector's own core from its unsaturated stars.
+
+    The median over the stars of their stamps per unit Gaia flux, cut
+    on the integer pixel nearest each star (no resampling; the pixel
+    phases average out over the stars, as they do in an aperture sum):
+    the typical star's core at this detector's seeing, in nJy per unit
+    Gaia flux, the zero point included (its median star has amplitude
+    1).
+
+    Parameters
+    ----------
+    vexp: VisitExposure
+        Flattened (the sky subtracted)
+    stars: structured array
+        The census
+    gmin, gmax: float, optional
+        The stars used, unsaturated and on the image; default
+        CORE_STACK_GMIN, CORE_STACK_GMAX
+    half: int, optional
+        The stamp half size in px; default CORE_STACK_HALF
+
+    Returns
+    -------
+    stack: array (2 half + 1, 2 half + 1) or None
+        None with fewer than CORE_STACK_MIN stars
+    nstar: int
+        The stars stacked
+    """
+    gmin = CORE_STACK_GMIN if gmin is None else gmin
+    gmax = CORE_STACK_GMAX if gmax is None else gmax
+    half = CORE_STACK_HALF if half is None else half
+
+    image = vexp.image.array
+    good = vexp.good
+    ny, nx = image.shape
+    sel = ((stars['on_image'] == 1) & (stars['is_sat'] == 0)
+           & (stars['G'] >= gmin) & (stars['G'] < gmax))
+    stamps = []
+    for st in stars[sel]:
+        icx, icy = int(round(float(st['x']))), int(round(float(st['y'])))
+        if icx - half < 0 or icy - half < 0 or icx + half >= nx \
+                or icy + half >= ny:
+            continue
+        cut = np.s_[icy - half:icy + half + 1, icx - half:icx + half + 1]
+        stamp = image[cut].astype('f8')
+        stamp[~good[cut]] = np.nan
+        stamps.append(stamp / 10.0 ** (-0.4 * float(st['G'])))
+    nstar = len(stamps)
+    if nstar < CORE_STACK_MIN:
+        return None, nstar
+    return np.nanmedian(np.array(stamps), axis=0), nstar
+
+
+def core_pinned(vexp, stars, wing, rap, edge_factor=None, neighbors=None):
+    """
+    Measure the unsaturated on-image stars' amplitudes from their cores.
+
+    On the flattened image (the wide-box sky pass done), each such
+    star's flux within rap px over the wing's at amplitude 1, with the
+    sky noise over the aperture as the error.
+
+    Parameters
+    ----------
+    vexp: VisitExposure
+        Flattened
+    stars: structured array
+        The census
+    wing: WingModel
+        The wing used when the detector has too few stars for its own
+        core stack (detector_core_stack)
+    rap: float
+        The aperture radius in px
+    edge_factor: float, optional
+        Unused here; the edge stars are off the image and keep their
+        fit
+    neighbors: (x, y) arrays, optional
+        The positions of every Gaia star near the image; a census
+        star with one closer than CORE_NEIGHBOR px is not measured
+
+    Returns
+    -------
+    amps: array
+        Per census star, the core amplitude, 1 where not measured
+    errs: array
+        Their errors, nan where not measured
+    ok: bool array
+        Measured
+    """
+    from ..wing import core_amplitudes
+
+    sel = (stars['on_image'] == 1) & (stars['is_sat'] == 0)
+    if neighbors is not None:
+        from scipy.spatial import cKDTree
+
+        nx_, ny_ = neighbors
+        tree = cKDTree(np.c_[nx_, ny_])
+        pairs = tree.query_ball_point(
+            np.c_[stars['x'], stars['y']], CORE_NEIGHBOR,
+        )
+        # the star itself is in its own list
+        blended = np.array([len(p) > 1 for p in pairs])
+        nblend = int((sel & blended).sum())
+        sel &= ~blended
+        if nblend:
+            print(f'    {nblend} stars with a neighbor within '
+                  f'{CORE_NEIGHBOR:g} px left to the fit')
+    amps = np.ones(stars.size)
+    errs = np.full(stars.size, np.nan)
+    ok = np.zeros(stars.size, dtype=bool)
+    # the detector's own core, so the local seeing is in the model
+    # and not in the amplitudes
+    core, nstack = detector_core_stack(vexp, stars)
+    if core is None:
+        print(f'    core stack: only {nstack} stars, using the wing '
+              'given')
+        core = wing
+    else:
+        print(f'    core stack from {nstack} stars')
+    if sel.any():
+        a, e, k = core_amplitudes(
+            vexp.image.array, vexp.good, stars['x'][sel], stars['y'][sel],
+            stars['G'][sel].astype('f8'), core, rap,
+            amp_range=CORE_AMP_RANGE, sky_sigma=vexp.sky_sigma,
+        )
+        amps[sel], errs[sel], ok[sel] = a, e, k
+    print(f'    core amplitudes ({rap:g} px): {int(ok.sum())} of '
+          f'{int(sel.sum())} unsaturated stars measured, median '
+          f'{np.median(amps[ok]) if ok.any() else np.nan:.3f}')
+    return amps, errs, ok
+
+
+def core_free(stars, core_ok, shape, edge_factor):
+    """
+    Choose the stars the joint fit still fits after the core pinning.
+
+    The saturated stars on the image, and with an edge factor the
+    stars across the edge within edge_factor mask radii, brighter
+    than lsst_starsub.joint.GFIT; the core-measured stars are pinned.
+
+    Parameters
+    ----------
+    stars: structured array
+        The census
+    core_ok: bool array
+        The core-measured stars
+    shape: (ny, nx)
+    edge_factor: float or None
+
+    Returns
+    -------
+    free: bool array
+    """
+    from ..joint import GFIT
+
+    ny, nx = shape
+    x, y, G = stars['x'], stars['y'], stars['G'].astype('f8')
+    m = np.zeros(stars.size)
+    if edge_factor is not None:
+        m = edge_factor * circle_radius(G)
+    near = (x >= -m) & (x < nx + m) & (y >= -m) & (y < ny + m)
+    free = near & (G < GFIT) & ~core_ok
+    return free
+
+
+def star_key(ra, dec):
+    """
+    Key stars by position, to match census rows across detectors.
+
+    The census carries no source id; the same Gaia extract gives the
+    same positions on every detector, so the position rounded to a
+    micro-degree identifies the star.
+
+    Parameters
+    ----------
+    ra, dec: arrays
+        Degrees
+
+    Returns
+    -------
+    keys: list of (int, int)
+    """
+    ira = np.round(np.asarray(ra, dtype='f8') * 1e6).astype('i8')
+    idec = np.round(np.asarray(dec, dtype='f8') * 1e6).astype('i8')
+    return list(zip(ira.tolist(), idec.tolist()))
+
+
+def match_amplitudes(stars, amplitudes):
+    """
+    Look up each census star's consolidated amplitude.
+
+    Parameters
+    ----------
+    stars: structured array
+        The census, with ra and dec
+    amplitudes: structured array
+        With ra, dec and A
+
+    Returns
+    -------
+    amps: array
+        One per census star, 1 (the prediction) where the star is
+        not in the table
+    """
+    table = dict(zip(star_key(amplitudes['ra'], amplitudes['dec']),
+                     np.asarray(amplitudes['A'], dtype='f8').tolist()))
+    keys = star_key(stars['ra'], stars['dec'])
+    amps = np.array([table.get(k, 1.0) for k in keys], dtype='f8')
+    nfound = sum(k in table for k in keys)
+    print(f'    amplitudes for {nfound} of {stars.size} census stars '
+          f'from the consolidated table')
+    return amps
+
+
+def detector_field_radius(butler, detector):
+    """
+    Get a detector's distance from the focal-plane center.
+
+    Parameters
+    ----------
+    butler: lsst.daf.butler.Butler
+    detector: int
+
+    Returns
+    -------
+    radius: float
+        mm
+    """
+    from lsst.afw.cameraGeom import FOCAL_PLANE
+
+    camera = butler.get('camera', instrument=INSTRUMENT)
+    c = camera[int(detector)].getCenter(FOCAL_PLANE)
+    return float(np.hypot(c.getX(), c.getY()))
+
+
+def visit_detectors(butler, visit, max_radius=None):
+    """
+    List the detectors of a visit with a wcs and a calibration.
+
+    Parameters
+    ----------
+    butler: lsst.daf.butler.Butler
+    visit: int
+    max_radius: float, optional
+        mm: leave out the detectors whose center lies beyond this
+        focal-plane radius (the heavily vignetted ones); None keeps
+        all, MAX_FIELD_RADIUS is the visit scheme's cut
+
+    Returns
+    -------
+    detectors: list of int
+        Sorted
+    """
+    cat = butler.get(
+        'visit_summary', dataId=dict(instrument=INSTRUMENT, visit=int(visit)),
+    )
+    dets = sorted(
+        int(rec['id']) for rec in cat
+        if rec.getWcs() is not None and rec.getPhotoCalib() is not None
+    )
+    if max_radius is not None:
+        from lsst.afw.cameraGeom import FOCAL_PLANE
+
+        camera = butler.get('camera', instrument=INSTRUMENT)
+        keep = []
+        for det in dets:
+            c = camera[det].getCenter(FOCAL_PLANE)
+            if np.hypot(c.getX(), c.getY()) <= max_radius:
+                keep.append(det)
+        import sys
+        print(f'    {len(dets) - len(keep)} of {len(dets)} detectors beyond '
+              f'{max_radius:g} mm left out', file=sys.stderr)
+        dets = keep
+    return dets
+
 
 def make_visit_butler(repo=VISIT_REPO, collection=VISIT_COLLECTION):
     """
@@ -897,6 +1306,7 @@ def load_visit_exposure(butler, visit, detector, rng=None):
             )
 
     mask = convert_mask(exp.mask.array, exp.mask.getMaskPlaneDict())
+    flag_dead_pixels(mask, exp.variance.array)
 
     if rng is None:
         rng = np.random.default_rng(
