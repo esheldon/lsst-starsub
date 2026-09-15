@@ -138,12 +138,14 @@ def select_stars(gaia, x, y, mask0, gsub=GSUB, verbose=True,
         on = 0 <= ix < nx and 0 <= iy < ny
 
         if on:
-            m = 5
-            is_sat = (
-                gmag < GSAT + 0.5
-                and sat[max(0, iy - m):iy + m + 1,
-                        max(0, ix - m):ix + m + 1].any()
-            )
+            # saturation from the mask, not the magnitude: at good
+            # seeing stars a magnitude fainter than GSAT saturate (G
+            # 16.4 at 0.77 arcsec on the visits).  The fainter stars
+            # get a tighter test so a neighbor's bleed trail does not
+            # flag them
+            m = 5 if gmag < GSAT + 0.5 else 2
+            is_sat = sat[max(0, iy - m):iy + m + 1,
+                         max(0, ix - m):ix + m + 1].any()
             if not (is_sat or gmag < gsub):
                 continue
         else:

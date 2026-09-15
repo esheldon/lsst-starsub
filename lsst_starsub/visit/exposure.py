@@ -112,18 +112,36 @@ WIDE_GROW = 24          # circle margin for the fainter stars
 # core amplitudes outside this range (a neighbor in the aperture, a
 # star off its Gaia position) are left to the fit
 CORE_AMP_RANGE = (0.25, 4.0)
-# the detector's own core profile for the core amplitudes: the median of
+# the detector's own core profile for the core amplitudes: the mean of
 # the unsaturated stars' stamps in this G range, each per unit Gaia
-# flux, out to CORE_STACK_HALF px; at least CORE_STACK_MIN stars, else
-# the wing given is used.  The seeing varies across a visit (1.02-1.30
-# arcsec over visit 2025060400354) and a 5 px aperture's enclosed
-# fraction with it, so against the visit's pooled stack the
+# flux, out to CORE_STACK_HALF px, scaled to the wing's flux within
+# CORE_NORM_RAD px; at least CORE_STACK_MIN stars, else the wing given
+# is used.  The seeing varies across a visit (1.02-1.30 arcsec over
+# visit 2025060400354) and a 5 px aperture's enclosed fraction with it
+# (the stars' flux over the wing's within 5 px fell from 0.88 to 0.81
+# across that range), so against the visit's pooled stack the
 # per-detector core scale tracked the local fwhm (correlation -0.85,
-# -0.32 per arcsec); against the detector's own stack it does not
+# -0.32 per arcsec).  Within 12 px the ratio is flat to 2 percent, and
+# what remains is per-detector structure seen at every radius; so the
+# stack supplies the core shape at the detector's seeing, and its zero
+# point is the wing's at 12 px, which keeps the amplitudes relative to
+# the wing they render (a stack normalized to the detector's median
+# star rendered the wing 15 percent too bright on that visit)
 CORE_STACK_GMIN = 15.5
 CORE_STACK_GMAX = 19.0
 CORE_STACK_HALF = 12
 CORE_STACK_MIN = 20
+CORE_NORM_RAD = 12.0
+# the stack is a per-pixel mean with CORE_STACK_CLIP sigma clipping
+# (CORE_STACK_NCLIP rounds, sigma from the MAD over the stars), and
+# stars with a Gaia neighbor within CORE_STACK_ISOLATION px are left
+# out of it: a plain mean is thrown by the neighbors and galaxies in the
+# stamps (the stack's 5/12 px flux ratio scattered 2 and 4 percent
+# across the detectors of two visits after its seeing trend, 0.5 and 1.1
+# with the clipping, a further 0.1 with the isolation)
+CORE_STACK_CLIP = 3.0
+CORE_STACK_NCLIP = 2
+CORE_STACK_ISOLATION = 24.0
 # px: a star with another Gaia star closer than this is not measured
 # from its core (the aperture would hold both) and keeps the fit
 CORE_NEIGHBOR = 12.0
@@ -755,16 +773,71 @@ def handle_stars_visit(
 # butler-facing loaders
 # ---------------------------------------------------------------
 
-def detector_core_stack(vexp, stars, gmin=None, gmax=None, half=None):
+def core_pixels(vexp):
     """
-    Measure the detector's own core from its unsaturated stars.
+    The pixels a core measurement may use.
 
-    The median over the stars of their stamps per unit Gaia flux, cut
-    on the integer pixel nearest each star (no resampling; the pixel
-    phases average out over the stars, as they do in an aperture sum):
-    the typical star's core at this detector's seeing, in nJy per unit
-    Gaia flux, the zero point included (its median star has amplitude
-    1).
+    The usable pixels less the saturated and interpolated ones: an
+    interpolated core (a saturated star the census did not flag, a
+    cosmic ray) sums to a fraction of the star's flux.
+
+    Parameters
+    ----------
+    vexp: VisitExposure
+
+    Returns
+    -------
+    good: bool array
+    """
+    mask0 = vexp.mask.array[:, :, 0]
+    return vexp.good & ((mask0 & (DM_SAT | DM_INTRP)) == 0)
+
+
+def clipped_mean(stamps, nsig=None, niter=None):
+    """
+    The per-pixel sigma-clipped mean of a set of stamps.
+
+    Parameters
+    ----------
+    stamps: array (nstamp, ny, nx)
+        nan where not measured
+    nsig: float, optional
+        The clip in units of 1.4826 x the MAD about the median over
+        the stamps; default CORE_STACK_CLIP
+    niter: int, optional
+        Rounds of clipping; default CORE_STACK_NCLIP
+
+    Returns
+    -------
+    mean: array (ny, nx)
+    """
+    nsig = CORE_STACK_CLIP if nsig is None else nsig
+    niter = CORE_STACK_NCLIP if niter is None else niter
+    keep = np.isfinite(stamps)
+    for _ in range(niter):
+        kept = np.where(keep, stamps, np.nan)
+        med = np.nanmedian(kept, axis=0)
+        sig = 1.4826 * np.nanmedian(np.abs(kept - med), axis=0) + 1e-30
+        keep = np.isfinite(stamps) & (np.abs(stamps - med) < nsig * sig)
+    return np.nanmean(np.where(keep, stamps, np.nan), axis=0)
+
+
+def detector_core_stack(vexp, stars, wing, gmin=None, gmax=None, half=None,
+                        norm_rad=None, exclude=None):
+    """
+    Measure the detector's own core shape from its unsaturated stars.
+
+    The clipped mean over the stars of their stamps per unit Gaia
+    flux (clipped_mean), cut on the integer pixel nearest each star
+    (no resampling; the pixel phases average out over the stars, as
+    they do in an aperture sum; a per-pixel median narrows a pattern
+    that shifts from star to star, and a plain mean is thrown by the
+    neighbors and galaxies in the stamps), scaled so that its flux
+    within norm_rad px is the wing's.  The core at this detector's
+    seeing with the wing's zero point, in nJy per unit Gaia flux: an
+    amplitude measured against it renders the wing with the right flux
+    at norm_rad and beyond, whatever the local seeing did to the
+    enclosed fraction inside.
 
     Parameters
     ----------
@@ -772,11 +845,18 @@ def detector_core_stack(vexp, stars, gmin=None, gmax=None, half=None):
         Flattened (the sky subtracted)
     stars: structured array
         The census
+    wing: WingModel or (r, T)
+        The wing the amplitudes render, nJy per unit Gaia flux
     gmin, gmax: float, optional
         The stars used, unsaturated and on the image; default
         CORE_STACK_GMIN, CORE_STACK_GMAX
     half: int, optional
         The stamp half size in px; default CORE_STACK_HALF
+    norm_rad: float, optional
+        The radius the stack is matched to the wing within, at most
+        half; default CORE_NORM_RAD
+    exclude: bool array, optional
+        Per census star, left out of the stack (a neighbor too close)
 
     Returns
     -------
@@ -785,15 +865,25 @@ def detector_core_stack(vexp, stars, gmin=None, gmax=None, half=None):
     nstar: int
         The stars stacked
     """
+    from ..wing import profile_of
+
     gmin = CORE_STACK_GMIN if gmin is None else gmin
     gmax = CORE_STACK_GMAX if gmax is None else gmax
     half = CORE_STACK_HALF if half is None else half
+    norm_rad = CORE_NORM_RAD if norm_rad is None else norm_rad
+    if norm_rad > half:
+        raise ValueError(f'norm_rad {norm_rad} exceeds the stamp half {half}')
 
     image = vexp.image.array
-    good = vexp.good
+    good = core_pixels(vexp)
     ny, nx = image.shape
     sel = ((stars['on_image'] == 1) & (stars['is_sat'] == 0)
            & (stars['G'] >= gmin) & (stars['G'] < gmax))
+    if exclude is not None:
+        sel &= ~exclude
+    gy, gx = np.mgrid[-half:half + 1, -half:half + 1]
+    rr = np.hypot(gy, gx)
+    ap = rr <= norm_rad
     stamps = []
     for st in stars[sel]:
         icx, icy = int(round(float(st['x']))), int(round(float(st['y'])))
@@ -801,13 +891,20 @@ def detector_core_stack(vexp, stars, gmin=None, gmax=None, half=None):
                 or icy + half >= ny:
             continue
         cut = np.s_[icy - half:icy + half + 1, icx - half:icx + half + 1]
+        if not good[cut][ap].all():
+            continue
         stamp = image[cut].astype('f8')
         stamp[~good[cut]] = np.nan
-        stamps.append(stamp / 10.0 ** (-0.4 * float(st['G'])))
+        stamp /= 10.0 ** (-0.4 * float(st['G']))
+        stamps.append(stamp)
     nstar = len(stamps)
     if nstar < CORE_STACK_MIN:
         return None, nstar
-    return np.nanmedian(np.array(stamps), axis=0), nstar
+    stack = clipped_mean(np.array(stamps))
+    r, T = profile_of(wing, 0.5 * (gmin + gmax))
+    wsum = float(np.interp(rr[ap], r, T).sum())
+    stack *= wsum / stack[ap].sum()
+    return stack, nstar
 
 
 def core_pinned(vexp, stars, wing, rap, edge_factor=None, neighbors=None):
@@ -825,8 +922,9 @@ def core_pinned(vexp, stars, wing, rap, edge_factor=None, neighbors=None):
     stars: structured array
         The census
     wing: WingModel
-        The wing used when the detector has too few stars for its own
-        core stack (detector_core_stack)
+        The wing the amplitudes render: the detector's own core stack
+        (detector_core_stack) takes its zero point from it, and it is
+        used as is when the detector has too few stars for a stack
     rap: float
         The aperture radius in px
     edge_factor: float, optional
@@ -848,16 +946,21 @@ def core_pinned(vexp, stars, wing, rap, edge_factor=None, neighbors=None):
     from ..wing import core_amplitudes
 
     sel = (stars['on_image'] == 1) & (stars['is_sat'] == 0)
+    crowded = None
     if neighbors is not None:
         from scipy.spatial import cKDTree
 
         nx_, ny_ = neighbors
         tree = cKDTree(np.c_[nx_, ny_])
-        pairs = tree.query_ball_point(
-            np.c_[stars['x'], stars['y']], CORE_NEIGHBOR,
-        )
+        xy = np.c_[stars['x'], stars['y']]
         # the star itself is in its own list
-        blended = np.array([len(p) > 1 for p in pairs])
+        blended = np.array([
+            len(p) > 1 for p in tree.query_ball_point(xy, CORE_NEIGHBOR)
+        ])
+        crowded = np.array([
+            len(p) > 1
+            for p in tree.query_ball_point(xy, CORE_STACK_ISOLATION)
+        ])
         nblend = int((sel & blended).sum())
         sel &= ~blended
         if nblend:
@@ -866,9 +969,9 @@ def core_pinned(vexp, stars, wing, rap, edge_factor=None, neighbors=None):
     amps = np.ones(stars.size)
     errs = np.full(stars.size, np.nan)
     ok = np.zeros(stars.size, dtype=bool)
-    # the detector's own core, so the local seeing is in the model
-    # and not in the amplitudes
-    core, nstack = detector_core_stack(vexp, stars)
+    # the detector's own core shape with the wing's zero point, so the
+    # local seeing is in the model and not in the amplitudes
+    core, nstack = detector_core_stack(vexp, stars, wing, exclude=crowded)
     if core is None:
         print(f'    core stack: only {nstack} stars, using the wing '
               'given')
@@ -877,7 +980,8 @@ def core_pinned(vexp, stars, wing, rap, edge_factor=None, neighbors=None):
         print(f'    core stack from {nstack} stars')
     if sel.any():
         a, e, k = core_amplitudes(
-            vexp.image.array, vexp.good, stars['x'][sel], stars['y'][sel],
+            vexp.image.array, core_pixels(vexp), stars['x'][sel],
+            stars['y'][sel],
             stars['G'][sel].astype('f8'), core, rap,
             amp_range=CORE_AMP_RANGE, sky_sigma=vexp.sky_sigma,
         )

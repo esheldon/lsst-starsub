@@ -245,17 +245,43 @@ def test_detector_core_stack():
     ])
     stars['x'], stars['y'], stars['G'], stars['on_image'] = xs, ys, G, 1
     assert n >= CORE_STACK_MIN
-    stack, nstar = detector_core_stack(vexp, stars)
+    # the wing the amplitudes refer to: the same core at amplitude 1
+    r = np.linspace(0, 20, 401)
+    wing = (r, 1e9 * np.exp(-0.5 * r ** 2 / sig ** 2))
+    stack, nstar = detector_core_stack(vexp, stars, wing)
     assert nstar == n
     half = stack.shape[0] // 2
-    # the stack peaks at the median amplitude, a little below 1e9
-    # for the pixel phases
+    # the stack has the wing's zero point (its flux within 12 px), so
+    # it peaks at 1e9, a little below for the pixel phases
     peak = stack[half, half] / 1e9
-    assert 0.9 * np.median(truth) < peak <= np.median(truth) * 1.02
+    assert 0.9 < peak <= 1.02
     amps, errs, ok = core_amplitudes(
         vexp.image.array, vexp.good, xs, ys, G, stack, 5.0, sky_sigma=2.0,
     )
     assert ok.all()
-    # each star's amplitude relative to the median star, to the
-    # pixel-phase scatter of a 5 px aperture
-    assert np.allclose(amps / np.median(truth), truth, rtol=0.03)
+    # each star's amplitude is relative to the wing, not to the median
+    # star: the stack supplies only the core's shape
+    assert abs(np.median(amps) - np.median(truth)) < 0.02
+    # the faintest stars have 40 nJy in the aperture against a noise
+    # of 20, so 5 percent
+    assert np.allclose(amps, truth, rtol=0.05)
+    with pytest.raises(ValueError):
+        detector_core_stack(vexp, stars, wing, half=8)
+
+    # a bright blob 7 px from one stack star, a galaxy or an unlisted
+    # neighbor: the clipped mean is not thrown by it
+    ratio = stack[half, half] / stack[half, half + 4]
+    k = int(np.argmin(G))
+    rr2 = (yy - ys[k]) ** 2 + (xx - xs[k] - 7) ** 2
+    vexp.image.array[:] += (
+        50 * 1e9 * 10 ** (-0.4 * G[k]) * np.exp(-0.5 * rr2 / sig ** 2)
+    ).astype('f4')
+    stack2, nstar2 = detector_core_stack(vexp, stars, wing)
+    assert nstar2 == n
+    assert abs(stack2[half, half] / stack2[half, half + 4] / ratio - 1) < 0.02
+    assert abs(stack2[half, half] / stack[half, half] - 1) < 0.02
+    # and exclude leaves stars out
+    exclude = np.zeros(n, dtype=bool)
+    exclude[k] = True
+    stack3, nstar3 = detector_core_stack(vexp, stars, wing, exclude=exclude)
+    assert nstar3 == n - 1

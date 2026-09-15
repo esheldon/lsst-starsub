@@ -1203,6 +1203,92 @@ coadds.
       the wing shape at this visit's seeing (0.90 of the canonical at
       60-100 px) making the per-star residuals systematic rather than
       noise.  To look at with a second visit.
+   d. The second visit, 2025062000519 (fwhm 0.77", k_in/k_stamp 1.05;
+      `scripts/visit_edge_chain.sh VISIT BAND` runs the whole scheme,
+      run dir `edge-2025062000519/`), on the 155 inner detectors:
+      36,324 of 37,321 stars constrained, core scale 1.095 (scatter
+      0.26), chi2/cell median 1.06 max 1.41 (no bad detector).  The
+      bright cross-detector pairs now agree, chi rms 1.26 on 101
+      pairs (G < 12) against 2.43 at 1.15", and 0.75 at G 12-14: the
+      disagreement at poor seeing is the wing shape, as suspected;
+      the errors are right when the shape is.  The wing-fit scale
+      of the bright stars climbs from 0.98 at the center to 1.15 at
+      250-300 mm even inside the cut, more than on the poor-seeing
+      visit (1.09-1.10), so the field-radius term is not small at
+      good seeing.  The per-detector core scale still tracks the
+      local fwhm (correlation -0.50, -0.35 per arcsec over
+      0.70-0.89"): the seeing varies across a visit and a 5 px
+      aperture's enclosed fraction with it, so the core amplitude
+      now uses the detector's own core stack
+      (`visit.exposure.detector_core_stack`: the mean of the
+      unsaturated stars' integer-cut stamps per unit Gaia flux,
+      scaled to the median aperture sum; a per-pixel median narrows
+      the profile and ran 10 percent low), with stars that have a
+      Gaia neighbor within 12 px left to the fit.  Pass 2 on this
+      visit (`edge-stack-c-inner.png`): the bright edge stars' inner
+      residual +24 +13 +9 -3 at the prediction, +11 +12 +8 -1
+      consolidated, the same halving of the innermost bin as on visit
+      354 (+16 to +7); G 13-15 and 15-17 unchanged at a few 10^-3
+      sigma.  The reruns of pass 1 with the per-detector core stack
+      (`scripts/visit_pass1_rerun.sh VISIT BAND p1d`, then
+      `scripts/core_scale_by_detector.py` for the core scale against
+      the fwhm; on pass 1c the slope is -0.33 and -0.35 per arcsec
+      with correlation -0.88 and -0.50 on the two visits): the core
+      scale per detector comes out 0.997 and 1.007 (1 by construction,
+      the stack is normalized per detector), the slope against the
+      fwhm -0.02 and -0.10 per arcsec, the rms over detectors 0.008
+      and 0.010 against 0.015 and 0.020 about the old line; the bright
+      wing-fit scale (free = 1, A_err < 0.2) is unchanged, 0.97 inside
+      200 mm and 1.00 outside on both visits, and so is the bright
+      cross-detector chi rms.  The per-star scatter of the core
+      amplitudes is the color term either way (0.22-0.23).  Pass 2 at
+      the new amplitudes (`scripts/visit_pass2_rerun.sh VISIT BAND
+      p1d`, stacks `edge-stack-p2d-inner.png`) showed the flaw: the
+      on-image G 15-17 stack went from -1 -3 -1 -2 to -8 -6 -2 -2 on
+      visit 354 (and -3 -4 -3 to -1 -3 -3 on 519).  A stack normalized
+      to the detector's median star makes that star's amplitude 1, but
+      the amplitude renders the visit wing, whose inner zero point is
+      not the median star's: the stars' flux over the wing's is 0.85
+      on 354 and 1.07 on 519 at every radius from 5 to 16 px (the old
+      core scales, 0.859 and 1.096), so the pass-1d model was 15
+      percent too bright on 354.  The same probe (8 detectors per
+      visit across the fwhm range) shows where the seeing acts: the
+      ratio within 5 px falls 0.88 to 0.81 over 1.02-1.30 arcsec,
+      within 12 px it is flat to 2 percent and the residual scatter is
+      per-detector structure seen at all radii.  So the stack now
+      takes its zero point from the wing within 12 px
+      (`CORE_NORM_RAD`) and supplies only the core shape; the
+      amplitudes stay relative to the wing they render, as the bright
+      stars' are.  Pass 1e/2e with it: the on-image G 15-17 stack on
+      354 is back to -2 -3 -1 -2 (519: -4 -4 -3 -2), the core scale
+      0.872 and 1.124 with the slope against the fwhm gone (-0.07 and
+      -0.10 per arcsec, correlation -0.17 and -0.09).  But the stack
+      brought its own per-detector noise: the core scale scatters
+      0.031 and 0.035 across detectors against 0.016 and 0.020 about
+      the pass-1c seeing line, and the pass-1e/1c ratio per detector
+      scatters 0.03 after its seeing trend; not by raft or vendor
+      (e2v and ITL differ by 1 percent), not the star count.  On 24
+      detectors per visit the stack's 5/12 px flux ratio, after its
+      seeing trend, scatters 2.0 and 3.8 percent for the plain mean,
+      0.76 and 1.26 with Gaia neighbors within 24 px excluded, 0.52
+      and 1.17 with a 3 sigma per-pixel clipped mean, 0.50 and 1.04
+      with both; per-stamp normalization changes nothing.  So the
+      stack is now the clipped mean over the isolated stars
+      (`clipped_mean`, `CORE_STACK_CLIP`, `CORE_STACK_ISOLATION`).
+      Pass 1f/2f with it: the core scale 0.848 and 1.084, rms over
+      detectors 0.015 and 0.018 (pass 1c: 0.016 and 0.020 about its
+      seeing line, and the line is gone: slope -0.08 and -0.14 per
+      arcsec, no better than the scatter), the stack's own noise 0.7
+      and 1.0 percent (the pass-1f/1c ratio after its seeing trend);
+      the on-image G 15-17 stack -0 -3 -1 -1 on 354 (the best of the
+      runs) and -3 -4 -3 -2 on 519 (as pass 1c); the bright stars
+      unchanged throughout.  What remains per detector (1.5-1.8
+      percent, not radial, not by raft or vendor) is the detector's
+      own flux scale against Gaia, or its wing fraction; the per-chip
+      term the plan anticipated, to revisit with the field-radius
+      term.  This is the version to keep: the core amplitudes at 5 px
+      against the detector's own clipped core stack with the wing's
+      zero point at 12 px.
 
    What it says for the plan: a single visit does not constrain the
    wing amplitudes of stars fainter than G ~13 (the coadd does);

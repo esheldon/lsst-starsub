@@ -66,3 +66,31 @@ def test_select_stars_intruders():
     # the one at 150 px is out
     assert stars['on_image'].tolist() == [0, 0, 1]
     assert sorted(stars['G'][stars['on_image'] == 0].tolist()) == [12.0, 16.0]
+
+
+def test_select_stars_saturation_from_mask():
+    from lsst_starsub.census import GSAT, select_stars
+    from lsst_starsub.maskbits import DM_SAT
+
+    # at good seeing stars a magnitude fainter than GSAT saturate: the
+    # flag comes from the mask, with a tighter test for the fainter
+    # stars so a neighbor's bleed trail does not flag them
+    n = 400
+    mask0 = np.zeros((n, n), dtype='i4')
+    gaia = np.zeros(3, dtype=[
+        ('ra', 'f8'), ('dec', 'f8'), ('phot_g_mean_mag', 'f8'), ('ruwe', 'f8'),
+    ])
+    gaia['ra'] = [1.0, 1.1, 1.2]
+    gaia['dec'] = 0.0
+    gaia['ruwe'] = 1.0
+    gaia['phot_g_mean_mag'] = [GSAT + 1.0, GSAT + 1.0, GSAT + 1.0]
+    x = np.array([100.0, 200.0, 300.0])
+    y = np.array([100.0, 200.0, 300.0])
+    # saturated pixels at the first star's center, 4 px from the
+    # second's (a trail passing by), none at the third
+    mask0[100, 100] |= DM_SAT
+    mask0[204, 200] |= DM_SAT
+
+    stars = select_stars(gaia, x, y, mask0, gsub=19.0, verbose=False)
+    by_x = {int(s['x']): int(s['is_sat']) for s in stars}
+    assert by_x == {100: 1, 200: 0, 300: 0}

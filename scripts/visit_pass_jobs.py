@@ -38,7 +38,7 @@ export NUMEXPR_NUM_THREADS=1
     --gaia-file %(gaia_file)s \
     --star-model joint --canonical %(canonical)s \
     --edge-factor %(edge_factor)g%(amplitudes)s \
-    --profiles-only --outdir %(outdir)s
+    %(profiles_only)s--outdir %(outdir)s
 '''
 
 
@@ -60,6 +60,9 @@ def main():
                    help='pass --core-rap; --canonical must be the visit wing')
     p.add_argument('--mem', default='6G')
     p.add_argument('--time', default='00:20:00')
+    p.add_argument('--images', action='store_true',
+                   help='write the full image file (delivered, restored, '
+                        'sky, star model) instead of --profiles-only')
     args = p.parse_args()
 
     outdir = os.path.abspath(args.outdir)
@@ -90,6 +93,7 @@ def main():
                 visit=args.visit, detector=det, gaia_file=gaia_file,
                 canonical=os.path.abspath(args.canonical),
                 edge_factor=args.edge_factor, amplitudes=amplitudes,
+                profiles_only='' if args.images else '--profiles-only ',
                 outdir=outdir,
             ))
     print(f'{len(dets)} jobs in {jobdir} ({tag}); submit with '
