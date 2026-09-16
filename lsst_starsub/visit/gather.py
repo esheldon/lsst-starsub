@@ -84,6 +84,8 @@ def consolidate(tables, detectors):
     -------
     amplitudes: structured array
         One row per star seen on any detector: ra, dec, G, A, A_err,
+        D, D_err, disk_detector (the ghost disk from the detector that
+        constrains it best; D 1, the prediction, where none does),
         detector (the one chosen, -1 when no detector constrained
         the star and A is the prediction), ndet (the number of
         detectors that constrained it), on_image (of the chosen
@@ -101,18 +103,24 @@ def consolidate(tables, detectors):
             constrained = bool(st['free']) and np.isfinite(st['A_err'])
             entry = rows.setdefault(key, dict(
                 ra=float(st['ra']), dec=float(st['dec']), G=float(st['G']),
-                fits=[],
+                fits=[], disks=[],
             ))
             if constrained:
                 entry['fits'].append((
                     float(st['A_err']), float(st['A']), int(det),
                     int(st['on_image']),
                 ))
+            # the ghost disk (tables written before the disks have no
+            # D column: the prediction, unconstrained)
+            if 'D' in table.dtype.names and np.isfinite(st['D_err']):
+                entry['disks'].append((float(st['D_err']), float(st['D']),
+                                       int(det)))
 
     amp_dtype = [
         ('ra', 'f8'), ('dec', 'f8'), ('G', 'f4'), ('A', 'f8'),
         ('A_err', 'f8'), ('detector', 'i4'), ('ndet', 'i4'),
-        ('on_image', 'i2'),
+        ('on_image', 'i2'), ('D', 'f8'), ('D_err', 'f8'),
+        ('disk_detector', 'i4'),
     ]
     pair_dtype = [
         ('ra', 'f8'), ('dec', 'f8'), ('G', 'f4'),
@@ -124,12 +132,15 @@ def consolidate(tables, detectors):
     for key in sorted(rows):
         e = rows[key]
         fits = sorted(e['fits'])
+        disks = sorted(e['disks'])
+        dsk = disks[0] if disks else (np.nan, 1.0, -1)
         if fits:
             err, a, det, on = fits[0]
             amps.append((e['ra'], e['dec'], e['G'], a, err, det,
-                         len(fits), on))
+                         len(fits), on, dsk[1], dsk[0], dsk[2]))
         else:
-            amps.append((e['ra'], e['dec'], e['G'], 1.0, np.nan, -1, 0, 0))
+            amps.append((e['ra'], e['dec'], e['G'], 1.0, np.nan, -1, 0, 0,
+                         dsk[1], dsk[0], dsk[2]))
         if len(fits) >= 2:
             (e1, a1, d1, _), (e2, a2, d2, _) = fits[:2]
             pairs.append((e['ra'], e['dec'], e['G'], a1, e1, d1, a2, e2, d2))

@@ -473,18 +473,51 @@ def build_wide_star_mask(stars, shape):
     return wide
 
 
-def box_background(image, usable, bw, min_frac=0.1):
+def boxes_at(boxes, bw, x, y):
+    """
+    Evaluate a box-grid background at positions.
+
+    Bilinear between the box centers at ((i + 0.5) bw, (j + 0.5) bw),
+    clamped beyond the outermost centers: the evaluation
+    box_background uses, so the product's sky is reproduced exactly
+    from the stored boxes (lsst_starsub.visit.product).
+
+    Parameters
+    ----------
+    boxes: array (my, mx)
+        The box values, every box finite
+    bw: int
+        The box size in px
+    x, y: arrays
+        Positions in px, the pixel centers at integers
+
+    Returns
+    -------
+    values: array, x's shape
+    """
+    from scipy import ndimage
+
+    x = np.asarray(x, dtype='f8')
+    coords = np.array([np.asarray(y, dtype='f8').ravel() / bw - 0.5,
+                       x.ravel() / bw - 0.5])
+    out = ndimage.map_coordinates(
+        np.asarray(boxes, dtype='f8'), coords, order=1, mode='nearest',
+    )
+    return out.reshape(x.shape)
+
+
+def box_background(image, usable, bw, min_frac=0.1, return_boxes=False):
     """
     A box-median background that cannot overshoot in masked regions.
 
     The median per bw x bw box of the usable pixels, boxes with fewer
     than min_frac of their pixels usable filled from the nearest box
     that has them, a 3 x 3 median filter over the boxes, and bilinear
-    interpolation between the box centers (clamped at the edges).
-    sep's spline over the boxes overshot by 60 nJy in a detector corner
-    that the wide star exclusion of a G 9.6 star covered; the joint
-    fit's segmentation then masked the plateau as a source, and the
-    hole stayed in the product.
+    interpolation between the box centers (clamped at the edges,
+    boxes_at).  sep's spline over the boxes overshot by 60 nJy in a
+    detector corner that the wide star exclusion of a G 9.6 star
+    covered; the joint fit's segmentation then masked the plateau as a
+    source, and the hole stayed in the product.
 
     Parameters
     ----------
@@ -495,11 +528,15 @@ def box_background(image, usable, bw, min_frac=0.1):
         The box size in px
     min_frac: float, optional
         A box needs this fraction of usable pixels to count
+    return_boxes: bool, optional
+        Also return the box grid the background is interpolated from
 
     Returns
     -------
     back: array (f4)
         The background, the image's shape
+    boxes: array (ny // bw, nx // bw)
+        With return_boxes
     """
     from scipy import ndimage
     from .profiles import box_medians
@@ -519,11 +556,10 @@ def box_background(image, usable, bw, min_frac=0.1):
     # clamped to it, and the partial boxes at the far edges (dropped
     # by box_medians) take the last full box's value
     yy, xx = np.mgrid[0:ny, 0:nx]
-    coords = np.array([yy.ravel() / bw - 0.5, xx.ravel() / bw - 0.5])
-    back = ndimage.map_coordinates(
-        med.astype('f8'), coords, order=1, mode='nearest',
-    )
-    return back.reshape(ny, nx).astype('f4')
+    back = boxes_at(med, bw, xx, yy).astype('f4')
+    if return_boxes:
+        return back, med
+    return back
 
 
 def sky_background(vexp, exclude, bw):
@@ -555,8 +591,13 @@ def sky_background(vexp, exclude, bw):
     seg = field_segmentation(image - back0, good, vexp.sky_sigma)
 
     bad = ~good | (seg > 0) | exclude
-    back = box_background(image, ~bad, bw)
+    back, boxes = box_background(image, ~bad, bw, return_boxes=True)
     vexp.image.array[:, :] -= back
+    # the box grid of the last pass, for the product (the joint route
+    # runs one pass before the fit; its boxes plus the mesh nodes
+    # reproduce the sky model exactly)
+    vexp.sky_boxes = boxes
+    vexp.sky_bw = int(bw)
 
     print(
         f'    sky background (bw {bw}, {bad.mean():.2f} masked): '
@@ -748,9 +789,13 @@ def handle_stars_visit(
             )
         if amplitudes is not None:
             # the second pass: every star at its consolidated
-            # amplitude, the sky alone refit
+            # amplitude and disk, the sky alone refit
             extra['amps'] = match_amplitudes(stars, amplitudes)
             extra['gfit'] = -np.inf
+            extra['fit_disks'] = False
+            if 'D' in amplitudes.dtype.names:
+                extra['disks'] = match_amplitudes(stars, amplitudes,
+                                                  column='D')
         jf = joint_fit(
             vexp.image.array, vexp.good & ~starmask, stars, canonical,
             vexp.sky_sigma,
@@ -772,7 +817,7 @@ def handle_stars_visit(
             stars=stars, star_table=star_table, starmask=starmask,
             dstar=dstar, slist=[], restored=restored, sky=sky,
             star_model=star_model_img, delivered=delivered, fwhm=fwhm,
-            joint=jf,
+            joint=jf, sky_boxes=(vexp.sky_boxes, vexp.sky_bw),
         )
 
     for iround in range(nround):
@@ -1096,7 +1141,7 @@ def star_key(ra, dec):
     return list(zip(ira.tolist(), idec.tolist()))
 
 
-def match_amplitudes(stars, amplitudes):
+def match_amplitudes(stars, amplitudes, column='A', default=1.0):
     """
     Look up each census star's consolidated amplitude.
 
@@ -1114,11 +1159,11 @@ def match_amplitudes(stars, amplitudes):
         not in the table
     """
     table = dict(zip(star_key(amplitudes['ra'], amplitudes['dec']),
-                     np.asarray(amplitudes['A'], dtype='f8').tolist()))
+                     np.asarray(amplitudes[column], dtype='f8').tolist()))
     keys = star_key(stars['ra'], stars['dec'])
-    amps = np.array([table.get(k, 1.0) for k in keys], dtype='f8')
+    amps = np.array([table.get(k, default) for k in keys], dtype='f8')
     nfound = sum(k in table for k in keys)
-    print(f'    amplitudes for {nfound} of {stars.size} census stars '
+    print(f'    {column} for {nfound} of {stars.size} census stars '
           f'from the consolidated table')
     return amps
 

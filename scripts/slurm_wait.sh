@@ -30,7 +30,9 @@ missing_jobs() {  # $1 jobdir $2 pattern $3 outdir $4 visit -> job files
 
 wait_complete() {  # $1 jobdir $2 pattern $3 outdir $4 visit
     local jobdir=$1 pattern=$2 outdir=$3 visit=$4
-    drain $pattern-
+    # the queue prefix carries the visit, so visits running side by
+    # side do not wait for each other
+    drain $pattern-$visit-
     for round in $(seq 1 $MAX_ROUNDS); do
         local miss=$(missing_jobs $jobdir $pattern $outdir $visit)
         local n=$(echo "$miss" | grep -c .)
@@ -39,9 +41,9 @@ wait_complete() {  # $1 jobdir $2 pattern $3 outdir $4 visit
         for job in $miss; do
             rm -f $job.submitted ${job%.sl}.submitted
         done
-        (cd $jobdir && slurm-incsub --pattern $pattern- -n 1500 -p 30 *.sl \
+        (cd $jobdir && slurm-incsub --pattern $pattern-$visit- -n 1500 -p 30 *.sl \
             > incsub-round$round.log 2>&1)
-        drain $pattern-
+        drain $pattern-$visit-
     done
     local miss=$(missing_jobs $jobdir $pattern $outdir $visit)
     echo "$pattern: still missing after $MAX_ROUNDS rounds:"

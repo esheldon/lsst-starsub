@@ -331,3 +331,31 @@ def test_box_background_no_overshoot():
     assert np.abs(back - sky)[have].max() < 3.0
     # the far-edge partial boxes are filled, not zero
     assert np.all(np.isfinite(back)) and back[-1, -1] > 900
+
+
+def test_product_evaluations_match_renderers():
+    from lsst_starsub.joint import render_mesh
+    from lsst_starsub.visit.exposure import box_background, boxes_at
+    from lsst_starsub.visit.product import Product, mesh_at, sky_at
+
+    rng = np.random.default_rng(21)
+    shape = (300, 340)
+    # the mesh: evenly spaced nodes past the far edge, random values
+    xn = np.arange(0, shape[1] + 64, 64, dtype='f8')
+    yn = np.arange(0, shape[0] + 64, 64, dtype='f8')
+    values = rng.normal(0, 3.0, (yn.size, xn.size))
+    ref = render_mesh((xn, yn), values.ravel(), shape)
+    yy, xx = np.mgrid[0:shape[0], 0:shape[1]]
+    got = mesh_at(xn, yn, values, xx, yy)
+    assert np.allclose(got, ref, atol=1e-4)
+    # the boxes: box_background's image equals boxes_at on the grid
+    image = (1000.0 + rng.normal(0, 5.0, shape)).astype('f4')
+    usable = np.ones(shape, dtype=bool)
+    back, boxes = box_background(image, usable, 32, return_boxes=True)
+    assert np.allclose(boxes_at(boxes, 32, xx, yy), back, atol=1e-3)
+    # the product's sky is their sum, at any position
+    p = Product()
+    p.xn, p.yn, p.node_values, p.boxes, p.bw = xn, yn, values, boxes, 32
+    assert np.allclose(sky_at(p, xx, yy), back + ref, atol=1e-3)
+    assert np.isfinite(sky_at(p, np.array([10.3, 339.9]),
+                              np.array([0.2, 299.7]))).all()

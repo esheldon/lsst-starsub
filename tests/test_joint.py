@@ -175,3 +175,38 @@ def test_free_override():
     assert jf['free'].tolist() == [False, True]
     assert jf['A'][0] == truth[0] and not np.isfinite(jf['A_err'][0])
     assert abs(jf['A'][1] - truth[1]) < 0.1
+
+
+def test_ghost_disk_recovered():
+    # a bright star with its wing and a ghost disk of a known
+    # amplitude on a sky plane; the star's inner region masked as the
+    # census would: the fit recovers the wing amplitude and the disk
+    n, spacing = 2048, 256
+    rng = np.random.RandomState(5)
+    yy, xx = np.mgrid[0:n, 0:n]
+    sky = 0.5 + 0.4 * xx / n - 0.2 * yy / n
+    r = np.arange(0.0, 3000.0, 0.5)
+    canonical = (r, 4e8 * (1.0 + r / 3.0) ** -2.5)
+    stars = np.zeros(1, dtype=[('x', 'f8'), ('y', 'f8'), ('G', 'f4')])
+    stars['x'], stars['y'], stars['G'] = 1000.0, 1050.0, 6.5
+    d_true = 1.4
+    image = (sky + rng.normal(size=(n, n))
+             + 0.9 * render_canonical_stars((n, n), stars, canonical,
+                                            gsub=99.0, verbose=False)
+             + jmod.render_disks((n, n), stars, np.array([d_true])))
+    good = np.hypot(xx - 1000.0, yy - 1050.0) > 300.0
+    jf = jmod.joint_fit(image, good, stars, canonical, 1.0,
+                        spacing=spacing, gfit=99.0, verbose=False)
+    assert jf['disk_free'][0] and jf['free'][0]
+    assert abs(jf['A'][0] - 0.9) < 0.05
+    assert abs(jf['D'][0] - d_true) < 0.05
+    assert jf['D_err'][0] < 0.05
+    # the disk pinned: a sky-only fit at the given amplitudes
+    jf2 = jmod.joint_fit(image, good, stars, canonical, 1.0,
+                         spacing=spacing, gfit=-np.inf,
+                         amps=np.array([0.9]), disks=np.array([d_true]),
+                         fit_disks=False, verbose=False)
+    assert not jf2['disk_free'][0] and jf2['D'][0] == d_true
+    assert np.isnan(jf2['D_err'][0])
+    resid = image - jf2['sky'] - jf2['star_model']
+    assert abs(np.median(resid[good])) < 0.05

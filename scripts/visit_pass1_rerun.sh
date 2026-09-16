@@ -21,7 +21,7 @@ export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 
 W=$run/wing-$V-$B.fits
 python $S/visit_pass_jobs.py $V detectors-inner.txt pass$T jobs-$T $W \
-    --band $B --core-rap 5 --tag $T
+    --band $B --core-rap 5 --tag $T --diagnostics all
 (cd jobs-$T && slurm-incsub --pattern $T- -n 1500 -p 30 *.sl > incsub.log 2>&1)
 wait_complete $run/jobs-$T $T pass$T $V || exit 1
 echo "pass$T outputs: $(ls pass$T/profiles-*.fits | wc -l) of $(wc -l < detectors-inner.txt)"

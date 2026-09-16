@@ -1431,8 +1431,137 @@ coadds.
       maps: `focal-plane-mosaic-p2k.{pdf,png}` (`--marks none` for the
       pdf), `focal-plane-cut-p2k.pdf`, `raft-R23-mosaic-p2k.pdf`,
       `edge-check-p2k.png`, `trough-compare-p2k.png`.
-      Next: the tier-3 test, the coadd of patch 55 from the
-      per-visit models against the coadd-level route.
+10. The coadd test on patch 55 from the per-visit models (tier 3;
+    planned 2026-09-16).  The clean coadd is the delivered coadd plus
+    the coadd of the per-detector corrections (the pipeline's
+    background put back, minus our sky, minus our star model), each
+    correction evaluated at the coadd's pixels through the WCS and
+    weighted as the CellCoadd weighted that input: linear, exact,
+    noise-free, no resampling of a model image.  Steps: (1) the
+    product and its renderer; (2) the scheme on the 65 i-band visits
+    of tract 7275 (templates and Gaia extracts exist); (3) the
+    correction coadd per cell; (4) the coadd-level checks (stacks,
+    cell sky statistics) against the delivered and the joint-fit
+    coadds; (5) an lsst-mdet method that reads the correction plane,
+    and the shear response on the patch 55 cells.
+    a. Done: the product.  The profiles file now carries the
+       wide-pass box grid (`sky_boxes`, header BW; `box_background`
+       returns it, `sky_background` keeps it on the exposure, the
+       joint route returns it), so with the mesh nodes and the census
+       amplitudes it reproduces the fit.  `lsst_starsub.visit.product`:
+       `read_product`, `sky_at` (the boxes plus the mesh at any
+       position, `boxes_at` and `mesh_at` being the evaluations
+       `box_background` and `render_mesh` make), `render_sky`,
+       `render_stars`, `wing_file`.  Verified on detector 103 of visit
+       354 against the in-process fit: the sky to 1.2e-4 nJy (the
+       nodes are stored as float32), the star model to 0.  Files
+       written before this (pass 2k and earlier) lack `sky_boxes`; a
+       pass-2 rerun adds it.  Still to add: a star-model evaluation
+       at arbitrary positions for the coadd frame (the wing at the
+       transformed star positions).
+    b. Running (launched 2026-09-16): the scheme on the 64 i-band
+       visits of tract 7275 with a pooled template (2025071800489 has
+       none), `scripts/run_tract_visits.sh tract-07275-visits-i.txt i
+       6` -> `scripts/visit_scheme.sh VISIT BAND` per visit, six
+       visits side by side, in `~/oh/starsub-visits/tract-07275/VISIT/`
+       (detectors-inner.txt, the visit wing, pass1/, pass2/,
+       scheme.log).  Per job the profile measurement was three
+       quarters of the time (105 of 138 s on detector 103), so the
+       production passes use the new `--no-profiles` (the files keep
+       the census, nodes, boxes and maps; no profile tables): 38 s a
+       job, about 220 core-hours for the run.  The CLI prints stage
+       timings.  The waits are per visit (the queue prefix carries
+       the visit, `slurm_wait.sh`).  Disk: 670 kB a detector with
+       the maps, 14 GB for the run; the product alone is 40 kB.  So
+       (in the checkout, NOT installed until this run completes,
+       since its jobs call the installed CLI with `--no-profiles`)
+       the small file is now the product by default and
+       `--diagnostics maps,profiles|all` adds the rest; `--no-profiles`
+       stays as a hidden no-op for the running chain.  The diagnostic
+       chains (`visit_edge_chain.sh`, the rerun scripts) pass
+       `--diagnostics all`; `visit_scheme.sh` still passes
+       `--no-profiles` and should drop it after the install.  The
+       focal-plane figures need `maps`.
+    c. A finding from the renderer (2026-09-16): the brightest stars'
+       amplitudes are not trustworthy.  On visit 354 the G 5.74 star
+       on detector 103 has A = -0.10 +- 0.03 from its own detector in
+       every pass-1 run since the first (canonical wing, -0.135), and
+       +2.6 +- 0.16 from detector 106, where it is 750 px off the
+       edge; the gather takes the smaller error.  G 6.41: 0.04; G
+       4.28: 2.46; on visit 519 the G 5.74 and 6.32 stars 0.17 and
+       0.19.  With A <= 0 the renderer draws nothing (as the fit's
+       own does) and the mesh carries the wing: the pass-2k "flat"
+       state around the G 5.7 star is 0.11 sigma at 423 px where the
+       model at A = 1 is 1.06, i.e. the sky model holds the star.
+       For the clean coadd the split does not matter (sky and stars
+       are both subtracted), but the product's split is wrong, the
+       inner-wing residual of these stars is left to a 256 px mesh
+       (the +16 to +38 x 10^-3 sigma first bins of the G 6-9 stacks),
+       and two detectors disagreeing by 2.8 at "3 percent" errors
+       means the errors are wrong for them: beyond a 450 px mask the
+       far wing is nearly degenerate with the mesh, and something
+       (a ghost, an asymmetric halo, the aureole shape) pulls the
+       two sides apart.  To do with the wing terms (improvement 2):
+       look at the data around a G 5-6 star against the model with
+       the mesh held (a fit with the star pinned and the residual
+       measured before any refit), and until then pin the stars
+       brighter than ~G 8 to the prediction or give them a tight
+       prior, since the fit adds nothing reliable for them.
+       The cause, found the same day from the raw sky (the delivered
+       map plus the pipeline's sky map, 32 px boxes, sources masked,
+       minus the 2000-3000 px level) around the brightest stars of
+       both visits:
+       - A ghost disk, the user's "circular feature": flat light
+         from the mask edge out to a sharp edge at 800-850 px (2.7
+         arcmin), centered on the star to ~50 px on most stars (one
+         G 6.55 star reaches 1250 px in one quadrant), a pupil image
+         from a reflection.  Level 18 nJy on the G 5.74 star, 3-5 nJy
+         on the G 6.4-7.0 stars, 5-6 nJy on two G 7.55 stars: not a
+         function of G alone (the i-band flux, i.e. the color, and
+         perhaps the field position).  Beyond the edge the wing is at
+         or below 1 nJy.
+       - The wing model itself is 2-3x too bright inside ~500 px for
+         the G 6.4-7.0 stars on both visits (model 12-16 nJy at 425-
+         475 px against 3-5 measured), but not for the G 7.55 stars
+         (data above the model everywhere): the bright-end magnitude
+         term of the canonical wing is off.
+       So the fitted amplitudes of 0.04-0.5 are measurements of a
+       wrong model, and the +2.6 from the neighboring detector is its
+       bottom rows sitting on the disk's edge (15 nJy where the wing
+       says 8).  Both effects are at the nJy level of the trough
+       itself, for the ~10 stars brighter than G 7.5 on a visit, and
+       the mesh cannot absorb a sharp edge, so they leave rings.  To
+       do (the wing work, now first): a disk component per bright
+       star in the joint fit (a uniform disk of the measured radius,
+       free amplitude, its center a fit or a field-position rule;
+       the sharp edge makes it separable from the mesh) and the
+       bright-end wing term from the pooled 64-visit pass-1 data.
+       Figure: scratchpad `bright-star-raw-354.png`.
+       The stacked template (`scripts/bright_star_stamps.py` per
+       visit: the raw sky with the initial background put back,
+       other stars' circles and the segmentation masked, 2800 px
+       stamps binned 4 x 4; `scripts/bright_star_stack.py`: a plane
+       through 1100-1380 px removed, each star normalized by its
+       500-700 px level, median stack; `~/oh/starsub-visits/
+       bright-stamps/`, 45 stars G < 7.5 from the first six visits of
+       the tract run, `stack-g75.png`): a disk of radius 827 px with
+       the half-level edge at 829, 824, 825, 831 px in the four
+       quadrants, so centered on the star to a few px and circular;
+       the same radius for G < 6.5 (832) and G 6.5-7.5 (820).  Inside,
+       the profile falls from 8.9 plateau units at 212 px to 1.0 at
+       490 px (the wing), then 1.05 -> 0.66 from 500 to 812 px (the
+       flat disk plus the wing's tail), a bump to 1.27 at 538 px (a
+       second, fainter ring?), the edge 0.66 -> 0.15 between 812 and
+       862 px, a tail to zero by 1000 px.  The level: 18-20 nJy on
+       the G 5.74 star in four visits (consistent), 24 and 37 on the
+       G 4.28 star in two, 4-7 on the G 6.3-6.4 stars, 1.6-7.2 on G
+       6.8-7.0, 2-5 on G 7.3-7.5; per unit Gaia flux a median of
+       2.2e3 nJy with a half 16-84 spread of 48 percent (the i-band
+       flux against G, i.e. the color).  So the component to add is a
+       uniform disk of radius 827 px per star with a free amplitude,
+       rendered with the wing; the stack itself, with the wing model
+       subtracted, is the empirical shape if a uniform disk proves
+       too crude (the 538 px bump).
 
    What it says for the plan: a single visit does not constrain the
    wing amplitudes of stars fainter than G ~13 (the coadd does);

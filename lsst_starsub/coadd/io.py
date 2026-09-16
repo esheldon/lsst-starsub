@@ -127,10 +127,11 @@ def write_profiles_file(
     ----------
     fname: str
         The output file
-    dedges: array
+    dedges: array or None
         The d - r_mask annulus edges
-    dtable: structured array
-        The per-star d - r_mask profile table
+    dtable: structured array or None
+        The per-star d - r_mask profile table; None (--no-profiles)
+        writes neither
     meta: dict
         The run identity, written as a one-row table
     star_table: structured array, optional
@@ -148,12 +149,12 @@ def write_profiles_file(
 
     print('writing:', fname)
 
-    dedges_t = np.zeros(1, dtype=[('edges', 'f8', dedges.size)])
-    dedges_t['edges'][0] = dedges
-
     with rustfits.FITS(fname, 'w+') as fits:
-        fits.write_table(dtable, extname='profiles_dmask')
-        fits.write_table(dedges_t, extname='dmask_edges')
+        if dtable is not None:
+            dedges_t = np.zeros(1, dtype=[('edges', 'f8', dedges.size)])
+            dedges_t['edges'][0] = dedges
+            fits.write_table(dtable, extname='profiles_dmask')
+            fits.write_table(dedges_t, extname='dmask_edges')
         fits.write_table(_meta_table(meta), extname='meta')
         if star_table is not None:
             fits.write_table(star_table, extname='gaia_stars')

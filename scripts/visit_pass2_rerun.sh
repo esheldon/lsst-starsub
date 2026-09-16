@@ -29,7 +29,7 @@ if [ "$n1" -lt "$ndet" ]; then
 fi
 W=$run/wing-$V-$B.fits
 python $S/visit_pass_jobs.py $V detectors-inner.txt pass$P2-consolidated jobs-$P2 $W \
-    --band $B --amplitudes pass$T/amplitudes-$V-$B.fits --tag $P2
+    --band $B --amplitudes pass$T/amplitudes-$V-$B.fits --tag $P2 --diagnostics all
 (cd jobs-$P2 && slurm-incsub --pattern $P2- -n 1500 -p 30 *.sl > incsub.log 2>&1)
 wait_complete $run/jobs-$P2 $P2 pass$P2-consolidated $V || exit 1
 echo "pass$P2 outputs: $(ls pass$P2-consolidated/profiles-*.fits | wc -l) of $ndet"

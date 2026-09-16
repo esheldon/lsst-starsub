@@ -28,7 +28,7 @@ lsst-starsub-visit-wing --template $base/templates/template-$V-$B.fits \
 W=$run/wing-$V-$B.fits
 gen="python $S/visit_pass_jobs.py $V detectors-inner.txt"
 
-$gen pass1c jobs-p1c $W --band $B --core-rap 5 --tag p1c
+$gen pass1c jobs-p1c $W --band $B --core-rap 5 --tag p1c --diagnostics all
 (cd jobs-p1c && slurm-incsub --pattern p1c- -n 1500 -p 30 *.sl > incsub.log 2>&1)
 wait_complete $run/jobs-p1c p1c pass1c $V || exit 1
 echo "pass1c outputs: $(ls pass1c/profiles-*.fits | wc -l) of $(wc -l < detectors-inner.txt)"
@@ -44,8 +44,8 @@ rustfits.write(out, a, extname='amplitudes', mode='w+')
 rustfits.write(out, m, extname='meta', mode='r+')
 print('wrote', out)
 PY
-$gen pass2c-consolidated jobs-p2c $W --band $B --amplitudes pass1c/amplitudes-$V-$B.fits --tag p2c
-$gen pass2c-prediction jobs-p2cp $W --band $B --amplitudes pass1c/amplitudes-prediction-$V-$B.fits --tag p2cp
+$gen pass2c-consolidated jobs-p2c $W --band $B --amplitudes pass1c/amplitudes-$V-$B.fits --tag p2c --diagnostics all
+$gen pass2c-prediction jobs-p2cp $W --band $B --amplitudes pass1c/amplitudes-prediction-$V-$B.fits --tag p2cp --diagnostics all
 (cd jobs-p2c && slurm-incsub --pattern p2c- -n 1500 -p 30 *.sl > incsub.log 2>&1)
 (cd jobs-p2cp && slurm-incsub --pattern p2cp- -n 1500 -p 30 *.sl > incsub.log 2>&1)
 wait_complete $run/jobs-p2c p2c pass2c-consolidated $V || exit 1

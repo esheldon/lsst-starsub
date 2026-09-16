@@ -89,10 +89,23 @@ def get_args():
     )
     parser.add_argument(
         '--profiles-only', action='store_true',
-        help='write only the profile tables and the census '
-             '(profiles-{stem}.fits, as lsst-starsub-remeasure '
-             'writes), not the image planes; implies --no-plot',
+        help='write the small per-detector file (profiles-{stem}.fits: '
+             'the product, plus --diagnostics), not the image planes; '
+             'implies --no-plot',
     )
+    parser.add_argument(
+        '--diagnostics', default='',
+        help='with --profiles-only, what to write beyond the product '
+             '(the census with amplitudes, the sky mesh nodes and the '
+             'wide-pass box grid, about 40 kB a detector): a comma '
+             'separated subset of maps (the box-median maps of the '
+             'image states and sky models, 600 kB) and profiles (the '
+             'per-star profile tables, three quarters of the run time), '
+             'or all; default none',
+    )
+    parser.add_argument(
+        '--no-profiles', action='store_true', help=argparse.SUPPRESS,
+    )   # kept for jobs written before the diagnostics option; a no-op
     parser.add_argument(
         '--list-inputs', action='store_true',
         help='print the selected inputs (visit detector iq_score, '
@@ -139,7 +152,8 @@ def joint_outputs(res, meta):
     Returns
     -------
     star_table: structured array
-        The census table with A, A_err and free
+        The census table with A, A_err, free, and the ghost disks' D,
+        D_err, disk_free
     extra: dict
         'nodes': the sky mesh nodes (ix, iy, x, y, value, err)
     """
@@ -147,8 +161,10 @@ def joint_outputs(res, meta):
 
     jf = res['joint']
     star_table = rfn.append_fields(
-        res['star_table'], ['A_err', 'free'],
-        [jf['A_err'].astype('f8'), jf['free'].astype('i2')],
+        res['star_table'], ['A_err', 'free', 'D', 'D_err', 'disk_free'],
+        [jf['A_err'].astype('f8'), jf['free'].astype('i2'),
+         jf['D'].astype('f8'), jf['D_err'].astype('f8'),
+         jf['disk_free'].astype('i2')],
         usemask=False,
     )
     xn, yn = jf['nodes']
@@ -200,7 +216,14 @@ def process_one(butler, visit, detector, args, iq_score=np.nan):
         f'visit {visit} detector {detector} '
         f'iq {iq_score:.2e} ({iq_tier(iq_score)})'
     )
+    import time
+    t0 = time.time()
+
+    def stamp(label):
+        print(f'    [{time.time() - t0:6.1f} s] {label}', flush=True)
+
     vexp = load_visit_exposure(butler, visit, detector)
+    stamp('exposure loaded')
     band = vexp.band
     gaia = load_gaia_for_exposure(
         vexp, gaia_file=args.gaia_file, gmax=max(args.gsub, 19.0),
@@ -226,6 +249,7 @@ def process_one(butler, visit, detector, args, iq_score=np.nan):
         nround=args.nround, **joint,
     )
 
+    stamp('stars and sky done')
     residual = vexp.image.array
     # the restored image, sky-flattened by our model: the
     # wings-on-flat-sky state the template was fit to
@@ -249,24 +273,35 @@ def process_one(butler, visit, detector, args, iq_score=np.nan):
         skycorr_starsub=skycorr - res['star_model'],
     )
     seg = field_segmentation(residual, vexp.good, vexp.sky_sigma)
-    # each state referenced to its own ambient level, measured
-    # outside the wide star exclusion
-    wide = build_wide_star_mask(res['stars'], seg.shape)
-    ambient = ambient_levels(states, vexp, seg, wide)
-    print('    ambient levels (nJy): ' + ', '.join(
-        f'{k} {v:.2f}' for k, v in ambient.items()
-    ))
-    # with the edge stars in the fit, their wings on this detector
-    # are measured too
-    on_image_only = args.edge_factor is None
-    edges, ptable = measure_profiles(
-        states, vexp, res['stars'], seg, ambient=ambient,
-        on_image_only=on_image_only,
-    )
-    dedges, dtable = measure_profiles(
-        states, vexp, res['stars'], seg, ambient=ambient,
-        mode='dmask', on_image_only=on_image_only,
-    )
+    stamp('segmentation for the profiles')
+    wanted = set(args.diagnostics.replace('all', 'maps,profiles').split(','))
+    wanted.discard('')
+    if not wanted <= {'maps', 'profiles'}:
+        raise ValueError(f'--diagnostics {args.diagnostics!r}: maps, '
+                         'profiles or all')
+    # the full-image file carries the profiles
+    with_profiles = 'profiles' in wanted or not args.profiles_only
+    edges = ptable = dedges = dtable = None
+    if with_profiles:
+        # each state referenced to its own ambient level, measured
+        # outside the wide star exclusion
+        wide = build_wide_star_mask(res['stars'], seg.shape)
+        ambient = ambient_levels(states, vexp, seg, wide)
+        print('    ambient levels (nJy): ' + ', '.join(
+            f'{k} {v:.2f}' for k, v in ambient.items()
+        ))
+        # with the edge stars in the fit, their wings on this detector
+        # are measured too
+        on_image_only = args.edge_factor is None
+        edges, ptable = measure_profiles(
+            states, vexp, res['stars'], seg, ambient=ambient,
+            on_image_only=on_image_only,
+        )
+        dedges, dtable = measure_profiles(
+            states, vexp, res['stars'], seg, ambient=ambient,
+            mode='dmask', on_image_only=on_image_only,
+        )
+        stamp('profiles measured')
 
     meta = dict(
         tract=args.tract, patch=args.patch, band=band,
@@ -306,12 +341,21 @@ def process_one(butler, visit, detector, args, iq_score=np.nan):
             sky_skycorr=dm_initial + vexp.backgrounds['skycorr'],
             sky_starsub=dm_initial - res['restored'] + res['sky'],
         )
-        maps = state_maps(states, usable)
-        maps.update(state_maps(skies, np.ones(usable.shape, dtype=bool)))
+        maps = {}
+        if 'maps' in wanted:
+            maps = state_maps(states, usable)
+            maps.update(state_maps(skies,
+                                   np.ones(usable.shape, dtype=bool)))
+        if 'sky_boxes' in res:
+            # the wide-pass box grid: with the mesh nodes, the sky model
+            # exactly (lsst_starsub.visit.product)
+            boxes, bw = res['sky_boxes']
+            maps['sky_boxes'] = (boxes, {'BW': bw})
         write_profiles_file(
             os.path.join(args.outdir, f'profiles-{stem}.fits'),
             dedges, dtable, meta, star_table=star_table,
-            rtable=(edges, ptable), extra=extra, maps=maps,
+            rtable=None if edges is None else (edges, ptable),
+            extra=extra, maps=maps,
         )
         return
 

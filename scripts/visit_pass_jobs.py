@@ -38,7 +38,7 @@ export NUMEXPR_NUM_THREADS=1
     --gaia-file %(gaia_file)s \
     --star-model joint --canonical %(canonical)s \
     --edge-factor %(edge_factor)g%(amplitudes)s \
-    %(profiles_only)s--outdir %(outdir)s
+    %(profiles_only)s%(no_profiles)s%(diagnostics)s--outdir %(outdir)s
 '''
 
 
@@ -60,6 +60,12 @@ def main():
                    help='pass --core-rap; --canonical must be the visit wing')
     p.add_argument('--mem', default='6G')
     p.add_argument('--time', default='00:20:00')
+    p.add_argument('--no-profiles', action='store_true',
+                   help='(a no-op since the CLI writes the product alone '
+                        'by default; kept for the running production '
+                        'chain)')
+    p.add_argument('--diagnostics', default=None,
+                   help='pass --diagnostics: maps, profiles or all')
     p.add_argument('--images', action='store_true',
                    help='write the full image file (delivered, restored, '
                         'sky, star model) instead of --profiles-only')
@@ -94,6 +100,9 @@ def main():
                 canonical=os.path.abspath(args.canonical),
                 edge_factor=args.edge_factor, amplitudes=amplitudes,
                 profiles_only='' if args.images else '--profiles-only ',
+                no_profiles='--no-profiles ' if args.no_profiles else '',
+                diagnostics=(f'--diagnostics {args.diagnostics} '
+                             if args.diagnostics else ''),
                 outdir=outdir,
             ))
     print(f'{len(dets)} jobs in {jobdir} ({tag}); submit with '

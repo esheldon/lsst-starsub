@@ -566,6 +566,123 @@ def render_mesh(nodes, values, shape, block=RENDER_BLOCK):
     return out
 
 
+# the ghost disk of the bright stars: an out-of-focus pupil image
+# centered on the star, flat inside a sharp edge.  Measured 2026-09-16
+# on 45 stars G < 7.5 of six i-band visits (scripts/bright_star_stack.py):
+# the half-level edge at 827 px, the same in every quadrant and for G <
+# 6.5 and 6.5-7.5, the transition 812 -> 862 px; the level 2.2e3 nJy
+# per unit Gaia flux with a 48 percent spread across stars (the i-band
+# flux against G), so each star's disk gets its own amplitude, with a
+# prior of DISK_PRIOR_SIGMA about the prediction.  The radius is set by
+# the optics, not the band; the level per unit flux may differ per band
+DISK_RADIUS = 827.0
+DISK_EDGE = 25.0        # px: the edge falls linearly over +- this
+DISK_GMAX = 8.0         # stars brighter than this get a disk column
+DISK_LEVEL = 2.2e3      # nJy per unit Gaia flux, the prediction (D = 1)
+DISK_PRIOR_SIGMA = 0.5
+
+
+def disk_profile(r, radius=DISK_RADIUS, edge=DISK_EDGE):
+    """
+    The unit disk profile: 1 inside, a linear edge, 0 outside.
+
+    Parameters
+    ----------
+    r: array
+        Radii in px
+
+    Returns
+    -------
+    values: array
+    """
+    return np.clip((radius + edge - np.asarray(r, dtype='f8')) / (2 * edge),
+                   0.0, 1.0)
+
+
+def disk_prediction(G):
+    """The disk's predicted level in nJy for a star of Gaia G."""
+    return DISK_LEVEL * 10.0 ** (-0.4 * np.asarray(G, dtype='f8'))
+
+
+def disk_column(cy, cx, x, y, G, b=BIN):
+    """
+    Evaluate one star's disk at the cell centers of its window.
+
+    The values are for D = 1, the prediction (disk_prediction).
+
+    Parameters
+    ----------
+    cy, cx: arrays (my, mx)
+        The cell centers (binned_cells)
+    x, y: float
+        The star's position, pixels
+    G: float
+        Its Gaia G magnitude
+    b: int, optional
+        The cell side in px; default BIN
+
+    Returns
+    -------
+    idx: int array
+        The cells with a nonzero value, flat indices into cy, cx
+    vals: array
+        The disk at those cells, nJy
+    """
+    rmax = DISK_RADIUS + DISK_EDGE
+    my, mx = cy.shape
+    i0 = max(0, int((y - rmax) // b) - 1)
+    i1 = min(my, int((y + rmax) // b) + 2)
+    j0 = max(0, int((x - rmax) // b) - 1)
+    j1 = min(mx, int((x + rmax) // b) + 2)
+    if i1 <= i0 or j1 <= j0:
+        return np.zeros(0, dtype=int), np.zeros(0)
+    rr = np.hypot(cy[i0:i1, j0:j1] - y, cx[i0:i1, j0:j1] - x)
+    vals = float(disk_prediction(G)) * disk_profile(rr)
+    w = vals > 0
+    ii, jj = np.nonzero(w)
+    return (ii + i0) * mx + (jj + j0), vals[w]
+
+
+def render_disks(shape, stars, D):
+    """
+    Render the stars' ghost disks, in nJy.
+
+    Parameters
+    ----------
+    shape: (ny, nx)
+    stars: structured array
+        The census, with x, y and G
+    D: array
+        Per star, the disk amplitude (1 the prediction); 0 for no disk
+
+    Returns
+    -------
+    image: array (ny, nx) f4
+    """
+    ny, nx = shape
+    image = np.zeros((ny, nx), dtype='f4')
+    rmax = DISK_RADIUS + DISK_EDGE
+    for xk, yk, gk, dk in zip(stars['x'], stars['y'], stars['G'], D):
+        if not dk > 0:
+            continue
+        m = int(np.ceil(rmax)) + 1
+        ix, iy = int(round(float(xk))), int(round(float(yk)))
+        x0, x1 = max(0, ix - m), min(nx, ix + m + 1)
+        y0, y1 = max(0, iy - m), min(ny, iy + m + 1)
+        if x1 <= x0 or y1 <= y0:
+            continue
+        level = float(dk) * float(disk_prediction(gk))
+        dx = np.arange(x0, x1, dtype='f8') - float(xk)
+        dy = np.arange(y0, y1, dtype='f8') - float(yk)
+        for r0 in range(0, dy.size, RENDER_BLOCK):
+            r1 = min(dy.size, r0 + RENDER_BLOCK)
+            rr = np.hypot(dy[r0:r1, None], dx[None, :])
+            image[y0 + r0:y0 + r1, x0:x1] += (
+                level * disk_profile(rr)
+            ).astype('f4')
+    return image
+
+
 def star_column(cy, cx, x, y, G, canonical, b=BIN, eps=EPS):
     """
     Evaluate one star's wing at the cell centers of its window.
@@ -649,10 +766,12 @@ def joint_fit(
     free_margin=None,
     amps=None,
     free=None,
+    disks=None,
+    fit_disks=True,
     verbose=True,
 ):
     """
-    Fit the star amplitudes and the sky mesh together.
+    Fit the star amplitudes, the ghost disks and the sky mesh together.
 
     Weighted least squares on the good pixels binned b x b (see the
     module docstring), in npass passes: the first without a source
@@ -712,6 +831,15 @@ def joint_fit(
     free: bool array, optional
         Per census star, fit its amplitude; replaces the gfit and
         free_margin selection (a star without cells is still pinned)
+    disks: array, optional
+        Per census star, the ghost disk amplitude (1 the prediction,
+        disk_prediction) the pinned disks take and the center of the
+        free disks' prior; default 1.  Stars fainter than DISK_GMAX
+        have no disk whatever the value
+    fit_disks: bool, optional
+        Fit the disk amplitudes of the stars brighter than DISK_GMAX
+        whose disk reaches the image and has cells (default); False
+        pins every disk to disks
     verbose: bool, optional
         Print the per-pass summaries
 
@@ -720,8 +848,10 @@ def joint_fit(
     result: dict
         A (per census star; the amps value where pinned), A_err (1
         sigma of the free amplitudes, priors included; nan where
-        pinned), free (bool per star), sky (full res), star_model
-        (full res), nodes, node_values,
+        pinned), free (bool per star), D (per star, the disk
+        amplitude, 0 where the star has no disk), D_err (nan where
+        not fit), disk_free (bool per star), sky (full res), star_model
+        (full res: the wings plus the disks), nodes, node_values,
         node_err (their 1 sigma, priors included), ncell, chi2 (per
         cell), diffuse (full res bool: the large diffuse segments the
         last segmentation left to the sky fit; none with
@@ -784,18 +914,43 @@ def joint_fit(
             free[si] = False
     nfree = int(free.sum())
 
-    # the pinned stars' model, subtracted from the data
+    # the ghost disks: every star brighter than DISK_GMAX whose disk
+    # reaches the image; free where asked and there are cells
+    rdisk = DISK_RADIUS + DISK_EDGE
+    has_disk = ((G < DISK_GMAX) & (x >= -rdisk) & (x < nx + rdisk)
+                & (y >= -rdisk) & (y < ny + rdisk))
+    if disks is None:
+        disk_center = np.ones(stars.size)
+    else:
+        disk_center = np.array(disks, dtype='f8')
+        if disk_center.shape != (stars.size,):
+            raise ValueError('disks must have one value per census star')
+    D = np.where(has_disk, disk_center, 0.0)
+    disk_free = has_disk & bool(fit_disks)
+    disk_idx, disk_vals = {}, {}
+    for si in np.flatnonzero(disk_free):
+        idx, v = disk_column(cy, cx, float(x[si]), float(y[si]),
+                             float(G[si]), b=b)
+        if idx.size == 0 or not has_cells.ravel()[idx].any():
+            disk_free[si] = False
+        else:
+            disk_idx[si], disk_vals[si] = idx, v
+    ndisk = int(disk_free.sum())
+    nstar = nfree + ndisk
+
+    # the pinned stars' model (wings and disks), subtracted from the data
     pinned = stars[~free]
+    work = image.astype('f4')
     if pinned.size:
-        work = render_canonical_stars(
+        work = work - render_canonical_stars(
             image.shape,
             pinned,
             canonical,
             amps=prior_center[~free],
         )
-        np.subtract(image, work, out=work)
-    else:
-        work = image.astype('f4')
+    pinned_disk = has_disk & ~disk_free
+    if pinned_disk.any():
+        work -= render_disks(image.shape, stars[pinned_disk], D[pinned_disk])
 
     # the columns of the free stars at the cell centers
     ncell = cy.size
@@ -815,14 +970,19 @@ def joint_fit(
         cols.append(np.full(idx.size, k))
         vals.append(v)
 
-    if nfree > 0:
+    for k, si in enumerate(np.flatnonzero(disk_free)):
+        rows.append(disk_idx[si])
+        cols.append(np.full(disk_idx[si].size, nfree + k))
+        vals.append(disk_vals[si])
+
+    if nstar > 0:
         P = sparse.csc_matrix(
             (np.concatenate(vals),
              (np.concatenate(rows), np.concatenate(cols))),
-            shape=(ncell, nfree),
+            shape=(ncell, nstar),
         )
     else:
-        # a sky-only fit (every star pinned)
+        # a sky-only fit (every star and disk pinned)
         P = sparse.csc_matrix((ncell, 0))
 
     H, nodes = mesh_columns(cy, cx, image.shape, spacing)
@@ -834,8 +994,8 @@ def joint_fit(
     # units of F, chi2 x sky_sigma^2: 1 / delta^2 per pair
     smooth = None
     if MESH_SMOOTH_DELTA is not None:
-        D = mesh_difference_matrix(nodes)
-        smooth = (D.T @ D).toarray() / MESH_SMOOTH_DELTA**2
+        Dm = mesh_difference_matrix(nodes)
+        smooth = (Dm.T @ Dm).toarray() / MESH_SMOOTH_DELTA**2
 
     # first flattening for the segmentation: the mesh alone on
     # the good pixels
@@ -858,20 +1018,20 @@ def joint_fit(
         rhs = X.T @ (w * mean.ravel())
 
         # a tiny ridge on the mesh keeps unsupported nodes finite
-        F[nfree:, nfree:] += (
-            np.eye(F.shape[0] - nfree) * 1e-6 * w.sum() / ncell
+        F[nstar:, nstar:] += (
+            np.eye(F.shape[0] - nstar) * 1e-6 * w.sum() / ncell
         )
 
         if smooth is not None:
-            F[nfree:, nfree:] += smooth
+            F[nstar:, nstar:] += smooth
 
         # and on the amplitudes, at a level far below any star's
         # own information (a star losing its cells to the pass-2
         # segmentation would otherwise make F singular)
 
-        if nfree > 0:
-            F[:nfree, :nfree] += (
-                np.eye(nfree) * 1e-9 * np.diag(F)[:nfree].max()
+        if nstar > 0:
+            F[:nstar, :nstar] += (
+                np.eye(nstar) * 1e-9 * np.diag(F)[:nstar].max()
             )
 
         if prior_sigma is not None:
@@ -882,10 +1042,15 @@ def joint_fit(
             pw = sky_sigma**2 / prior_sigma**2
             F[:nfree, :nfree] += np.eye(nfree) * pw
             rhs[:nfree] += pw * prior_center[free]
+        if ndisk > 0:
+            pwd = sky_sigma**2 / DISK_PRIOR_SIGMA**2
+            F[nfree:nstar, nfree:nstar] += np.eye(ndisk) * pwd
+            rhs[nfree:nstar] += pwd * disk_center[disk_free]
 
         sol = np.linalg.solve(F, rhs)
         A[free] = sol[:nfree]
-        node_values = sol[nfree:]
+        D[disk_free] = sol[nfree:nstar]
+        node_values = sol[nstar:]
         model_cells = X @ sol
         resid_cells = (mean.ravel() - model_cells) * (w > 0)
 
@@ -898,6 +1063,7 @@ def joint_fit(
         if verbose:
             print(
                 f'    joint fit pass {ipass + 1}: {nfree} amplitudes, '
+                f'{ndisk} disks, '
                 f'{node_values.size} nodes ({spacing} px), '
                 f'{int((w > 0).sum())} cells, chi2/cell {chi2:.3f}; '
                 f'A of the brightest: '
@@ -918,6 +1084,8 @@ def joint_fit(
             amps=A,
             verbose=False,
         )
+        if has_disk.any():
+            resid += render_disks(image.shape, stars[has_disk], D[has_disk])
 
         np.subtract(image, resid, out=resid)
 
@@ -945,9 +1113,13 @@ def joint_fit(
     # bounds)
 
     cov = np.diag(np.linalg.inv(F))
-    node_err = sky_sigma * np.sqrt(np.maximum(cov[nfree:], 0.0))
+    node_err = sky_sigma * np.sqrt(np.maximum(cov[nstar:], 0.0))
     A_err = np.full(stars.size, np.nan)
     A_err[free] = sky_sigma * np.sqrt(np.maximum(cov[:nfree], 0.0))
+    D_err = np.full(stars.size, np.nan)
+    D_err[disk_free] = sky_sigma * np.sqrt(
+        np.maximum(cov[nfree:nstar], 0.0)
+    )
     sky_full = render_mesh(nodes, node_values, image.shape)
 
     model_full = render_canonical_stars(
@@ -957,11 +1129,16 @@ def joint_fit(
         amps=A,
         verbose=False,
     )
+    if has_disk.any():
+        model_full += render_disks(image.shape, stars[has_disk], D[has_disk])
 
     return dict(
         A=A,
         A_err=A_err,
         free=free,
+        D=D,
+        D_err=D_err,
+        disk_free=disk_free,
         sky=sky_full,
         star_model=model_full,
         nodes=nodes,
