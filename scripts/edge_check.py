@@ -135,6 +135,7 @@ def main():
     # across interior lines: the vertical and horizontal center lines
     # of every detector
     inner = {k: [] for k, _, _, _ in SKIES}
+    inner_by_line = []
     for d in dets:
         dx0, dx1, dy0, dy1 = fp.bounds[d]
         for axis in ('x', 'y'):
@@ -149,11 +150,23 @@ def main():
             for k, _, res, _ in SKIES:
                 a, b = strips(g[res], i0, j0, axis, n, fp.x0, fp.y0, cell)
                 inner[k].extend(a - b)
+                if k == 'starsub':
+                    diff = (a - b)[np.isfinite(a - b)]
+                    inner_by_line.append(
+                        (d, axis, np.sqrt(np.mean(diff ** 2))
+                         if diff.size else np.nan))
 
     def rms(v):
         v = np.array(v)
         v = v[np.isfinite(v)]
         return np.sqrt(np.mean(v ** 2)), v.size
+
+    def robust(v):
+        """1.4826 x the median absolute value: the rms of the bulk,
+        immune to the few lines through a badly modeled star"""
+        v = np.array(v)
+        v = v[np.isfinite(v)]
+        return 1.4826 * np.median(np.abs(v))
 
     print('\njump across the gaps (low side - high side, nJy), rms over '
           'bins:')
@@ -163,13 +176,23 @@ def main():
         r, n = rms(jump[sky])
         print(f'  {label:42s} {r:6.2f}')
     print('\nresidual mismatch (low side - high side of the residual, '
-          'nJy), rms over bins:')
-    print(f'  {"":42s} {"gaps":>8s} {"interior":>10s}')
+          'nJy): the robust rms over bins, and the plain rms in '
+          'parentheses (a few lines through a badly modeled star '
+          'dominate the plain rms):')
+    print(f'  {"":42s} {"gaps":>16s} {"interior":>16s}')
     for k, _, _, label in SKIES:
         rg, ng = rms(mism[k])
         ri, ni = rms(inner[k])
-        print(f'  {label:42s} {rg:8.2f} {ri:10.2f}   '
+        print(f'  {label:42s} {robust(mism[k]):6.2f} ({rg:5.2f}) '
+              f'{robust(inner[k]):8.2f} ({ri:5.2f})   '
               f'({ng} gap bins, {ni} interior bins)')
+    # the worst interior lines of the lsst-starsub residual
+    v = np.array(inner_by_line)
+    order = np.argsort(-np.abs(v[:, 2].astype(float)))[:6]
+    print('  worst interior lines (lsst-starsub): detector, axis, '
+          'mismatch rms over the line (nJy)')
+    for i in order:
+        print(f'    {int(v[i, 0]):4d} {v[i, 1]} {float(v[i, 2]):7.2f}')
 
     if args.out is None:
         return

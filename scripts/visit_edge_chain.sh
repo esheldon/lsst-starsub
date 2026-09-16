@@ -19,17 +19,7 @@ mkdir -p $run && cd $run
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 repo="--repo dp2_prep_future --collection LSSTCam/runs/DRP/DP2"
 
-wait_sweep() {  # $1 jobdir $2 pattern
-    sleep 60
-    until [ $(squeue -u $USER -h -o "%j" | grep -c "^$2") -eq 0 ]; do sleep 60; done
-    for round in 1 2 3; do
-        n=$($S/resubmit_preempted.sh $1 $2 1500 | head -1 | awk '{print $1}')
-        echo "$2 sweep $round: $n resubmitted"
-        [ "$n" = "0" ] && break
-        sleep 120
-        until [ $(squeue -u $USER -h -o "%j" | grep -c "^$2") -eq 0 ]; do sleep 60; done
-    done
-}
+source $S/slurm_wait.sh
 
 lsst-starsub-visit-detectors --visit $V $repo > detectors-inner.txt 2> detectors-inner.log
 cat detectors-inner.log
@@ -40,7 +30,7 @@ gen="python $S/visit_pass_jobs.py $V detectors-inner.txt"
 
 $gen pass1c jobs-p1c $W --band $B --core-rap 5 --tag p1c
 (cd jobs-p1c && slurm-incsub --pattern p1c- -n 1500 -p 30 *.sl > incsub.log 2>&1)
-wait_sweep $run/jobs-p1c p1c-
+wait_complete $run/jobs-p1c p1c pass1c $V || exit 1
 echo "pass1c outputs: $(ls pass1c/profiles-*.fits | wc -l) of $(wc -l < detectors-inner.txt)"
 lsst-starsub-visit-gather --visit $V --indir pass1c --detectors detectors-inner.txt > gather-p1c.log 2>&1
 cat gather-p1c.log
@@ -58,7 +48,7 @@ $gen pass2c-consolidated jobs-p2c $W --band $B --amplitudes pass1c/amplitudes-$V
 $gen pass2c-prediction jobs-p2cp $W --band $B --amplitudes pass1c/amplitudes-prediction-$V-$B.fits --tag p2cp
 (cd jobs-p2c && slurm-incsub --pattern p2c- -n 1500 -p 30 *.sl > incsub.log 2>&1)
 (cd jobs-p2cp && slurm-incsub --pattern p2cp- -n 1500 -p 30 *.sl > incsub.log 2>&1)
-wait_sweep $run/jobs-p2c p2c-
-wait_sweep $run/jobs-p2cp p2cp-
+wait_complete $run/jobs-p2c p2c pass2c-consolidated $V || exit 1
+wait_complete $run/jobs-p2cp p2cp pass2c-prediction $V || exit 1
 echo "outputs: consolidated $(ls pass2c-consolidated/profiles-*.fits | wc -l), prediction $(ls pass2c-prediction/profiles-*.fits | wc -l)"
 python $S/edge_stack.py pass2c-prediction pass2c-consolidated $V edge-stack-c-inner.png detectors-inner.txt 2>&1 | grep -v Warning

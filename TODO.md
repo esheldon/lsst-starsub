@@ -1399,9 +1399,38 @@ coadds.
       the corner residual is now +1.0 nJy against +0.9 for the
       detector and the segmentation excludes 5.6 instead of 12
       percent.  The change reaches pass 1 too (the core stack and the
-      fit see the flattened image), so pass 1j/2j rerun on both
-      visits; then the edge check, the mosaics and the trough figures
-      again.
+      fit see the flattened image), so pass 1j/2j reran on both
+      visits (2026-09-16; the first attempt gathered a partial pass 1
+      after the preemption sweeps ran out, so the rerun scripts now
+      source `scripts/slurm_wait.sh`, which resubmits by missing
+      outputs until complete, and pass 2 refuses a partial pass 1).
+      Pass 1 is unchanged by the fix to the numbers quoted above
+      (core scale 0.848 and 1.092, the same rms and slopes, the same
+      edge-star stacks).  The edge check with the fix, now with a
+      robust rms (1.4826 x the median absolute value; the plain rms
+      is dominated by a few lines through bright extended sources
+      that the box maps did not mask, which `seg == 0` in the maps
+      now handles, pass 2k):
+        visit 354 (pass 2k): residual mismatch across the gaps,
+        robust rms in nJy, ours 0.61 against 0.64 across interior
+        lines; the pipeline's polynomial sky 1.38 against 0.73,
+        skyCorr 1.55 against 0.77.  Visit 519: ours 0.57 against
+        0.61; polynomial 1.18 against 0.71, skyCorr 1.41 against
+        0.72.  With the sources masked in the maps the plain rms
+        agrees within 30 percent (ours 0.79 against 0.72 and 0.86
+        against 0.83; the worst interior lines are now 2-4 nJy, the
+        halos of bright galaxies the segmentation leaves).  The data
+        jump across the gaps 5.7 and 6.4 nJy rms.
+      So with the sky pass fixed the one-sided edge nodes cost
+      nothing measurable (the gaps match the interiors on both
+      visits), while the pipeline's per-detector polynomial leaves
+      twice the interior mismatch at the gaps.  No focal-plane solve
+      is needed for the edges.  The trough profiles and the flatness
+      table are as before (G 6-9: delivered -99 -130 -96 -38, ours
+      +16 +15 +6 -1 on 354; +38 +20 +7 +1 on 519).  Figures from the
+      maps: `focal-plane-mosaic-p2k.{pdf,png}` (`--marks none` for the
+      pdf), `focal-plane-cut-p2k.pdf`, `raft-R23-mosaic-p2k.pdf`,
+      `edge-check-p2k.png`, `trough-compare-p2k.png`.
       Next: the tier-3 test, the coadd of patch 55 from the
       per-visit models against the coadd-level route.
 
