@@ -292,11 +292,13 @@ def process_one(butler, visit, detector, args, iq_score=np.nan):
             detector, 'fits',
         ))[:-5]
         # the image states binned to box medians with the sources
-        # masked, and the three total sky models (the pipeline's
-        # per-detector and focal-plane skies, ours) unmasked: the sky
-        # at the nJy level across the focal plane from the small files
+        # masked (the star masks and the segmentation: a bright
+        # extended source in a box median is a 100-1000 nJy outlier),
+        # and the three total sky models (the pipeline's per-detector
+        # and focal-plane skies, ours) unmasked: the sky at the nJy
+        # level across the focal plane from the small files
         # (scripts/focal_plane_mosaic.py)
-        usable = vexp.good & ~res['starmask']
+        usable = vexp.good & ~res['starmask'] & (seg == 0)
         dm_initial = (vexp.backgrounds['initial_coarse']
                       + vexp.backgrounds['initial_fine'])
         skies = dict(
