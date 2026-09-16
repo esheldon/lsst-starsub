@@ -230,14 +230,23 @@ def process_one(butler, visit, detector, args, iq_score=np.nan):
     # the restored image, sky-flattened by our model: the
     # wings-on-flat-sky state the template was fit to
     flat = res['delivered'] + res['restored'] - res['sky']
-    # the warp state: what the coadd inputs carried (the
-    # delivered image with the visit-level sky correction)
-    warp = res['delivered'] - vexp.backgrounds['skycorr']
+    # the skyCorr state: the delivered image with the visit-level sky
+    # correction applied, the input a warp would be made from if it
+    # were.  The DP2 deep coadd's warps do not apply it (makeDirectWarp
+    # doApplyNewBackground=False, verified 2026-09-07), so the coadd
+    # carries the delivered state; the pretty warps apply it
+    skycorr = res['delivered'] - vexp.backgrounds['skycorr']
+    # the pipeline's sky with our star model removed, at both levels:
+    # what the pipeline's product would look like with only the stars
+    # fixed, against residual with the sky refit too.  (Files written
+    # before 2026-09-15 call the skycorr states 'warp'.)
     states = dict(
         delivered=res['delivered'],
-        warp=warp,
+        skycorr=skycorr,
         flat=flat,
         residual=residual,
+        delivered_starsub=res['delivered'] - res['star_model'],
+        skycorr_starsub=skycorr - res['star_model'],
     )
     seg = field_segmentation(residual, vexp.good, vexp.sky_sigma)
     # each state referenced to its own ambient level, measured
@@ -277,14 +286,30 @@ def process_one(butler, visit, detector, args, iq_score=np.nan):
         star_table, extra = joint_outputs(res, meta)
     if args.profiles_only:
         from ..coadd.io import write_profiles_file
+        from ..visit.profiles import state_maps
         stem = os.path.basename(output_name(
             args.outdir, args.tract, args.patch, band, visit,
             detector, 'fits',
         ))[:-5]
+        # the image states binned to box medians with the sources
+        # masked, and the three total sky models (the pipeline's
+        # per-detector and focal-plane skies, ours) unmasked: the sky
+        # at the nJy level across the focal plane from the small files
+        # (scripts/focal_plane_mosaic.py)
+        usable = vexp.good & ~res['starmask']
+        dm_initial = (vexp.backgrounds['initial_coarse']
+                      + vexp.backgrounds['initial_fine'])
+        skies = dict(
+            sky_delivered=dm_initial,
+            sky_skycorr=dm_initial + vexp.backgrounds['skycorr'],
+            sky_starsub=dm_initial - res['restored'] + res['sky'],
+        )
+        maps = state_maps(states, usable)
+        maps.update(state_maps(skies, np.ones(usable.shape, dtype=bool)))
         write_profiles_file(
             os.path.join(args.outdir, f'profiles-{stem}.fits'),
             dedges, dtable, meta, star_table=star_table,
-            rtable=(edges, ptable), extra=extra,
+            rtable=(edges, ptable), extra=extra, maps=maps,
         )
         return
 

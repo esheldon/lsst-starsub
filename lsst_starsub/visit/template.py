@@ -11,7 +11,7 @@ template and aureole are built per visit from all its detectors:
   from the restored image with a wide-box sky pass
 - the wing cloud is the flux-normalized (10^(-0.4 G)) azimuthal
   profile of every census star brighter than AUR_GMAX, on the
-  warp state (raw minus the focal-plane skyCorr model, no
+  skyCorr state (raw minus the focal-plane skyCorr model, no
   detector-scale sky fit) so no local sky pass can have absorbed
   the wing; each detector's ambient level is subtracted first.
   Bright stars (G < FAR_GMAX) are measured to FAR_RMAX px, the
@@ -61,7 +61,7 @@ MID_RMAX = 900.0
 NBIN_WING = 30
 # the aureole fit range in the pooled cloud.  Beyond AUR_RMAX a
 # single visit cannot measure the wing: the per-star local sky
-# offsets of the warp state (a few nJy, detector-scale structure)
+# offsets of the skyCorr state (a few nJy, detector-scale structure)
 # exceed the wing there and only pooling over many visits
 # averages them out; the far cloud is kept for that
 AUR_RMIN = 40.0
@@ -188,7 +188,9 @@ def extract_detector(vexp, gaia, gsub=GSUB):
 
     delivered = vexp.image.array.copy()
 
-    # the warp state for the wings: no detector-scale sky fit
+    # the skyCorr state for the wings: no detector-scale sky fit (the
+    # stored field is still called ambient_warp, the template files'
+    # format)
     warp = delivered - vexp.backgrounds['skycorr']
 
     # the sky-flattened restored image for the stamps
@@ -207,7 +209,7 @@ def extract_detector(vexp, gaia, gsub=GSUB):
     )
 
     edges = wing_edges()
-    work = {'warp': warp - amb_warp}
+    work = {'skycorr': warp - amb_warp}
     far_edges = edges
     mid_edges = edges[edges <= MID_RMAX]
     _, tfar = measure_profiles(

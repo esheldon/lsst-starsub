@@ -1289,6 +1289,121 @@ coadds.
       term.  This is the version to keep: the core amplitudes at 5 px
       against the detector's own clipped core stack with the wing's
       zero point at 12 px.
+   e. The total package, sky and stars, checked against the pipeline
+      (2026-09-15; the tier-2 checks of the evaluation plan).
+      - Cross-visit amplitudes: 13,816 stars are on both visits.  For
+        the core-measured stars the ratio of the amplitudes (each
+        over its visit scale) scatters 0.9 percent per star (G
+        16.5-19.5) and 0.33 percent over detectors: the color term
+        cancels, and the 1.5-1.8 percent per-detector core-scale
+        scatter within a visit is the median's noise over ~150 stars
+        with a 0.2 color spread, not detector structure.  The bright
+        wing-fit stars differ by 0.31 rms, chi rms 1.4 (2.1 at G <
+        12, the poor-seeing wing shape again).  It also caught a
+        defect: at 0.77 arcsec 31 percent of the G 15.5-16.5 stars on
+        visit 519 had amplitudes 0.25-0.55, saturated (SAT|INTRP at
+        the core) but unflagged because the census tested saturation
+        only below GSAT + 0.5 = 15.7, and the core aperture summed
+        the interpolated pixels.  Now the flag comes from the mask at
+        any G (2 px for the fainter stars, 5 px for the bright, so a
+        neighbor's trail does not flag them) and the core
+        measurement and stack skip SAT and INTRP pixels
+        (`core_pixels`).  With it (pass 1g/2g) the outliers go from
+        318 to 22 of ~9000, none in G 15.5-16.5 (scatter 0.8
+        percent).  Note the census change also reaches the coadd
+        route through lsst-mdet: stars fainter than 15.7 with SAT in
+        the coadd mask are now saturated there too.
+      - The trough against the pipeline
+        (`scripts/visit_trough_compare.py`, profiles states
+        `delivered_starsub` and `warp_starsub`: the pipeline's
+        delivered and warp-state skies with our star model removed;
+        `trough-compare-p2h.png`, both visits, 155 detectors).  Around
+        G 6-9 stars the delivered sky dips -83 -131 -93 -38 x 10^-3
+        sigma at 221-808 px (3.5 nJy) on both visits; the warp state
+        (skyCorr applied; the DP2 deep coadd is built without it, so
+        the delivered state is what the coadd carries and this is
+        what a coadd of the pretty warps would) -22 -12 +10 -10 and
+        -12 -11 +21 +6; ours +17 +15 +5 -0 and +42 +17 +6 +1.  G
+        9-11: delivered -35 -27 -16 -6, ours +1 -1 -1 -2 beyond the
+        first bin.  G 11-15: everything within a few 10^-3 sigma.
+        The positive first bins of ours for the brightest stars (+17
+        at 1.15", +42 at 0.77", 30-37 stars) are the wing shape at
+        1.5-2 mask radii, the field-radius and seeing terms still to
+        add.
+      - Sky flatness and edge continuity on raft R23 of visit 354
+        (`scripts/raft_sky_checks.py` on the full-image pass-2 outputs
+        `images-p2g/`, detectors 99-107 with G 5.7 and 6.4 stars;
+        `raft-r23-sky-checks.png`).  Box medians (64 px) less each
+        state's far-field pedestal, by distance to the nearest G < 10
+        star (150-300, 300-600, 600-1200, 1200-2400 px): the delivered
+        sky -63 -64 -26 0, the warp sky -87 -27 -60 -35 (skyCorr's
+        smooth model leaves large-scale structure), ours +8 +2 0 -1.
+        The pedestals (what each estimator does with the unmasked
+        faint sources): delivered 0, warp +1.3 nJy, ours +0.46 nJy; a
+        coadd's own zero point absorbs them.  Across the 12 detector
+        gaps the data themselves jump by 3.9 nJy rms (0.3 percent of
+        the sky: real detector offsets, the per-chip terms of the
+        plan); the delivered per-detector polynomial follows them
+        (4.3 rms) and leaves 2.9 nJy rms of residual mismatch across
+        the gaps, skyCorr's model is smooth (1.75) and leaves 3.5,
+        ours follows them (3.4) and leaves 1.1.  So the sky product
+        is flat around the bright stars where the pipeline's dips by
+        2-3 nJy, and the per-detector mesh absorbs the real detector
+        offsets, which a focal-plane-continuous sky would have to
+        carry as per-chip terms.
+      Figures (`edge-2025060400354/`): `raft-r23-mosaic.png`
+      (`scripts/raft_mosaic.py`: the raft's sky in 32 px boxes, three
+      columns for the pipeline's delivered image, the same with
+      skyCorr applied and ours, two rows with the stars in and with
+      our star model removed: the pipeline's troughs around the G
+      5.7 and 6.4 stars and skyCorr's +-4 nJy structure against our
+      flat field), `raft-r23-cut.png` (`scripts/raft_star_cut.py`: the
+      cut through the G 5.7 star in a 544 px band), `before-after-103.png`
+      (`scripts/detector_before_after.py`: one detector, the delivered
+      image, the pipeline sky with our star removed, our residual),
+      and `trough-compare-p2h.png` on both visits (the profiles).
+   f. The edge-node question and a sky bug it caught (2026-09-15).
+      The profiles files now carry 32 px box-median maps of the image
+      states and the three total sky models
+      (`visit.profiles.box_medians`/`state_maps`, extensions
+      `box_*`), so the focal-plane figures come from the small files:
+      `scripts/focal_plane_mosaic.py` (the 3 x 2 mosaic on the camera
+      geometry, `focal-plane-mosaic-*.png`, `--cut` for the cut
+      through the brightest star) and `scripts/edge_check.py`, which
+      compares the residual across every gap between adjacent
+      detectors (strips of 4 boxes each side, 8-box bins along the
+      edge) with the same statistic across lines through detector
+      interiors: if the gap mismatch is no larger, the one-sided edge
+      nodes lose nothing.  On visit 354 (pass 2i): the data jump
+      across the gaps 5.1 nJy rms (real detector offsets); residual
+      mismatch across the gaps 1.27 nJy for ours against 1.04 in the
+      interiors, the pipeline's skies 2.17 against 1.12, so the
+      one-sided edges cost ~0.7 nJy rms per visit and the pipeline
+      twice that.  On visit 519 ours came out 2.86 against 1.76,
+      worse than the pipeline, and the per-pair table put it all on
+      three pairs around detectors 85, 82 and 77: in the corner of
+      detector 85 next to a G 9.6 star, our total sky sat 64 nJy low
+      over 128 x 800 px and the residual +66 nJy.  The wide-box sky
+      pass (sep, bw 256) extrapolated its spline into a corner 88
+      percent covered by the star's wide exclusion; the flattened
+      image there was a +64 nJy plateau, which the joint fit's
+      segmentation masked as a source, so the mesh had almost no
+      cells there (node errors 2-3 nJy against 0.2) and could not
+      correct it.  The same scan found the hole on detector 159 of
+      visit 354 harmlessly absorbed (the mesh had cells) and smaller
+      ones on 131 and 178 of 519.  Fix: `visit.exposure.box_background`
+      replaces sep in `sky_background`: box medians (min 10 percent
+      usable), empty boxes filled from the nearest box that has
+      pixels, a 3 x 3 median filter, bilinear interpolation clamped
+      at the edges; it cannot overshoot.  In-process on detector 85
+      the corner residual is now +1.0 nJy against +0.9 for the
+      detector and the segmentation excludes 5.6 instead of 12
+      percent.  The change reaches pass 1 too (the core stack and the
+      fit see the flattened image), so pass 1j/2j rerun on both
+      visits; then the edge check, the mosaics and the trough figures
+      again.
+      Next: the tier-3 test, the coadd of patch 55 from the
+      per-visit models against the coadd-level route.
 
    What it says for the plan: a single visit does not constrain the
    wing amplitudes of stars fainter than G ~13 (the coadd does);

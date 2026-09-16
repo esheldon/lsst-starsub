@@ -32,7 +32,9 @@ def get_args():
     )
     parser.add_argument('--output', required=True, help='pdf/png')
     parser.add_argument(
-        '--states', nargs='+', default=['delivered', 'warp', 'flat'],
+        '--states', nargs='+', default=['delivered', 'skycorr', 'flat'],
+        help='the image states to stack (files written before '
+             '2026-09-15 name the skycorr state warp)',
     )
     parser.add_argument(
         '--table', help='write the stacks to this fits file',

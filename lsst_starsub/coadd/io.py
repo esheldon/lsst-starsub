@@ -113,14 +113,15 @@ def write_visit_file(
 
 def write_profiles_file(
     fname, dedges, dtable, meta, star_table=None,
-    rtable=None, extra=None,
+    rtable=None, extra=None, maps=None,
 ):
     """
     Write the small per-detector output: the profiles alone.
 
     The d - r_mask profile table and edges (read by
     lsst-starsub-stack), the run meta, and optionally the census with
-    amplitudes and the radial profile table.
+    amplitudes, the radial profile table and the binned maps of the
+    image states.
 
     Parameters
     ----------
@@ -139,6 +140,9 @@ def write_profiles_file(
     extra: dict, optional
         extname -> structured array, further tables written after
         the rest (e.g. the joint fit's sky nodes)
+    maps: dict, optional
+        extname -> (map, header dict), small images written last
+        (the box-median maps of the image states, visit.profiles.box_medians)
     """
     import rustfits
 
@@ -162,6 +166,12 @@ def write_profiles_file(
         if extra is not None:
             for name, table in extra.items():
                 fits.write_table(table, extname=name)
+        if maps is not None:
+            for name, (image, hdr) in maps.items():
+                fits.write_image(
+                    np.ascontiguousarray(image, dtype='f4'),
+                    extname=name, header=hdr,
+                )
 
 
 def _meta_table(meta):

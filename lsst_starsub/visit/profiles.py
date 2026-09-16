@@ -432,3 +432,67 @@ def stack_profiles(
         med[wc] = np.nanmedian(profs[:, wc], axis=0)
 
     return med, count
+
+
+# the binned maps of the image states kept with the profiles: the
+# median per BOX_MAP px box with the sources masked, the sky at the
+# nJy level across a detector in a few thousand numbers
+BOX_MAP = 32
+
+
+def box_medians(image, usable, box=None, min_frac=0.5):
+    """
+    Bin an image to the median per box, masked pixels left out.
+
+    Parameters
+    ----------
+    image: array (ny, nx)
+    usable: bool array (ny, nx)
+        Pixels that count
+    box: int, optional
+        The box side in px; default BOX_MAP.  Partial boxes at the far
+        edges are dropped
+    min_frac: float, optional
+        Boxes with fewer usable pixels than this fraction are NaN
+
+    Returns
+    -------
+    med: array (ny // box, nx // box)
+    """
+    box = BOX_MAP if box is None else int(box)
+    ny, nx = image.shape
+    my, mx = ny // box, nx // box
+    im = np.where(usable, image, np.nan)[:my * box, :mx * box]
+    im = im.reshape(my, box, mx, box).transpose(0, 2, 1, 3)
+    im = im.reshape(my, mx, box * box)
+    ok = np.isfinite(im).sum(axis=2) >= min_frac * box * box
+    med = np.nanmedian(np.where(ok[:, :, None], im, np.nan), axis=2)
+    med[~ok] = np.nan
+    return med
+
+
+def state_maps(states, usable, box=None):
+    """
+    The box-median maps of several image states, for the profiles file.
+
+    Parameters
+    ----------
+    states: dict
+        name -> image (nJy)
+    usable: bool array
+        Pixels that count (the good pixels less the star mask)
+    box: int, optional
+        default BOX_MAP
+
+    Returns
+    -------
+    maps: dict
+        'box_' + name -> (map, header) as write_profiles_file takes;
+        the header carries BOX and STATE
+    """
+    box = BOX_MAP if box is None else int(box)
+    return {
+        f'box_{name}': (box_medians(image, usable, box),
+                        {'BOX': box, 'STATE': name})
+        for name, image in states.items()
+    }

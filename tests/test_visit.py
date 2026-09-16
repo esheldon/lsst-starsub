@@ -285,3 +285,49 @@ def test_detector_core_stack():
     exclude[k] = True
     stack3, nstar3 = detector_core_stack(vexp, stars, wing, exclude=exclude)
     assert nstar3 == n - 1
+
+
+def test_box_medians():
+    from lsst_starsub.visit.profiles import box_medians, state_maps
+
+    rng = np.random.default_rng(3)
+    image = rng.normal(0, 1, (70, 100)) + 5.0
+    usable = np.ones(image.shape, dtype=bool)
+    # a bright source the mask hides, and a box mostly masked
+    image[10:14, 10:14] = 1000.0
+    usable[10:14, 10:14] = False
+    usable[32:64, 0:30] = False
+    med = box_medians(image, usable, box=32)
+    assert med.shape == (2, 3)
+    assert np.isnan(med[1, 0])
+    assert np.allclose(med[np.isfinite(med)], 5.0, atol=0.5)
+    maps = state_maps({'a': image, 'b': 2 * image}, usable, box=32)
+    assert set(maps) == {'box_a', 'box_b'}
+    m, hdr = maps['box_b']
+    assert hdr['BOX'] == 32 and hdr['STATE'] == 'b'
+    assert np.allclose(m[0, 1], 2 * med[0, 1])
+
+
+def test_box_background_no_overshoot():
+    from lsst_starsub.visit.exposure import box_background
+
+    # a sky with a gradient, a large excluded corner: the background
+    # in the corner comes from the nearest boxes that have pixels and
+    # stays within the sky's range (a spline over the boxes overshot
+    # by 60 nJy on a real detector)
+    rng = np.random.default_rng(9)
+    n = 1024
+    yy, xx = np.mgrid[0:n, 0:n]
+    sky = 1000.0 + 0.02 * xx + 0.01 * yy
+    image = (sky + rng.normal(0, 20.0, (n, n))).astype('f4')
+    usable = np.ones((n, n), dtype=bool)
+    usable[:600, 500:] = False
+    back = box_background(image, usable, 128)
+    assert back.shape == image.shape
+    assert back.min() >= sky.min() - 5 and back.max() <= sky.max() + 5
+    # where there are pixels the background follows the sky to the
+    # box noise (20 / sqrt(128^2) ~ 0.2, the bilinear lag a little more)
+    have = usable & (xx > 64) & (xx < n - 64) & (yy > 64) & (yy < n - 64)
+    assert np.abs(back - sky)[have].max() < 3.0
+    # the far-edge partial boxes are filled, not zero
+    assert np.all(np.isfinite(back)) and back[-1, -1] > 900

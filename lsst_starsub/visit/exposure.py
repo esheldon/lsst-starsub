@@ -473,12 +473,65 @@ def build_wide_star_mask(stars, shape):
     return wide
 
 
+def box_background(image, usable, bw, min_frac=0.1):
+    """
+    A box-median background that cannot overshoot in masked regions.
+
+    The median per bw x bw box of the usable pixels, boxes with fewer
+    than min_frac of their pixels usable filled from the nearest box
+    that has them, a 3 x 3 median filter over the boxes, and bilinear
+    interpolation between the box centers (clamped at the edges).
+    sep's spline over the boxes overshot by 60 nJy in a detector corner
+    that the wide star exclusion of a G 9.6 star covered; the joint
+    fit's segmentation then masked the plateau as a source, and the
+    hole stayed in the product.
+
+    Parameters
+    ----------
+    image: array
+    usable: bool array
+        Pixels that count
+    bw: int
+        The box size in px
+    min_frac: float, optional
+        A box needs this fraction of usable pixels to count
+
+    Returns
+    -------
+    back: array (f4)
+        The background, the image's shape
+    """
+    from scipy import ndimage
+    from .profiles import box_medians
+
+    ny, nx = image.shape
+    med = box_medians(image, usable, box=bw, min_frac=min_frac)
+    empty = ~np.isfinite(med)
+    if empty.all():
+        raise ValueError('no usable box for the background')
+    if empty.any():
+        _, (iy, ix) = ndimage.distance_transform_edt(
+            empty, return_indices=True,
+        )
+        med = med[iy, ix]
+    med = ndimage.median_filter(med, size=3, mode='nearest')
+    # box centers at (i + 0.5) bw; pixels beyond the last center are
+    # clamped to it, and the partial boxes at the far edges (dropped
+    # by box_medians) take the last full box's value
+    yy, xx = np.mgrid[0:ny, 0:nx]
+    coords = np.array([yy.ravel() / bw - 0.5, xx.ravel() / bw - 0.5])
+    back = ndimage.map_coordinates(
+        med.astype('f8'), coords, order=1, mode='nearest',
+    )
+    return back.reshape(ny, nx).astype('f4')
+
+
 def sky_background(vexp, exclude, bw):
     """
-    Subtract a mask-aware sep background from the image in place.
+    Subtract a mask-aware box background from the image in place.
 
     Detections (1.5 sigma segmentation) and the exclusion zone stay
-    out of the boxes.
+    out of the boxes (box_background).
 
     Parameters
     ----------
@@ -493,26 +546,22 @@ def sky_background(vexp, exclude, bw):
     back: array
         The background subtracted
     """
-    import sep
-
-    image = np.ascontiguousarray(vexp.image.array, dtype='f4')
+    image = vexp.image.array
     good = vexp.good
 
     # the image may carry the full sky here: segment on a first
     # mask-only flattening, then fit with the detections out
-    bkg0 = sep.Background(image, mask=~good | exclude, bw=bw, bh=bw)
-    seg = field_segmentation(
-        image - bkg0.back(), good, vexp.sky_sigma,
-    )
+    back0 = box_background(image, good & ~exclude, bw)
+    seg = field_segmentation(image - back0, good, vexp.sky_sigma)
 
     bad = ~good | (seg > 0) | exclude
-    bkg = sep.Background(image, mask=bad, bw=bw, bh=bw)
-    back = bkg.back().astype('f4')
+    back = box_background(image, ~bad, bw)
     vexp.image.array[:, :] -= back
 
     print(
         f'    sky background (bw {bw}, {bad.mean():.2f} masked): '
-        f'globalback {bkg.globalback:.2f} rms {bkg.globalrms:.2f}'
+        f'median {np.median(back):.2f}, range {back.min():.1f} to '
+        f'{back.max():.1f}'
     )
 
     return back
