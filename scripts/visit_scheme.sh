@@ -40,7 +40,7 @@ gen="python $S/visit_pass_jobs.py $V detectors-inner.txt"
 
 # pass 1
 if [ $(ls pass1/profiles-*.fits 2> /dev/null | wc -l) -lt $ndet ]; then
-    $gen pass1 jobs-p1 $W --band $B --core-rap 5 --tag p1 --no-profiles >> $log
+    $gen pass1 jobs-p1 $W --band $B --core-rap 5 --tag p1 >> $log
     (cd jobs-p1 && slurm-incsub --pattern p1-$V- -n 1500 -p 30 *.sl > incsub.log 2>&1)
     wait_complete $run/jobs-p1 p1 pass1 $V >> $log || { echo "pass 1 incomplete" >> $log; exit 1; }
 fi
@@ -51,7 +51,7 @@ if [ ! -f $A ]; then
 fi
 # pass 2
 if [ $(ls pass2/profiles-*.fits 2> /dev/null | wc -l) -lt $ndet ]; then
-    $gen pass2 jobs-p2 $W --band $B --amplitudes $A --tag p2 --no-profiles >> $log
+    $gen pass2 jobs-p2 $W --band $B --amplitudes $A --tag p2 >> $log
     (cd jobs-p2 && slurm-incsub --pattern p2-$V- -n 1500 -p 30 *.sl > incsub.log 2>&1)
     wait_complete $run/jobs-p2 p2 pass2 $V >> $log || { echo "pass 2 incomplete" >> $log; exit 1; }
 fi

@@ -224,6 +224,76 @@ def load_wing(fname):
     return wing
 
 
+def handle_stars_correction(deep_coadd, wcs, gaia, correction_file,
+                            gsub=None, verbose=True):
+    """
+    The visit route on a patch coadd: apply the correction coadd.
+
+    The contract of handle_stars_joint, without a fit: the census and
+    star masks are built as there, the stored object background is
+    restored (apply_background(None)), and the correction plane of
+    lsst-starsub-correction-coadd (the per-visit sky and star models
+    coadded with the coadd's own weights) is added in place.  The
+    coadd is then sky-flat and star-free to the extent the per-visit
+    products are; nothing is fit here.
+
+    Parameters
+    ----------
+    deep_coadd: the patch coadd (image, mask, variance, bbox,
+        apply_background as the joint route expects)
+    wcs: ButlerWcs or FileWcs
+    gaia: array
+        The Gaia extract
+    correction_file: str
+        The correction coadd file of this patch and band; its X0, Y0
+        must match the coadd's bbox
+    gsub: float, optional
+        The census depth; default GSUB
+    verbose: bool, optional
+
+    Returns
+    -------
+    starmask, star_table, dstar, fit:
+        As handle_stars_joint; fit is None (no mesh, no amplitudes:
+        the products carry them per visit)
+    """
+    import rustfits
+    from ..census import GSUB, make_star_table, patch_census
+
+    if gsub is None:
+        gsub = GSUB
+    mask0 = deep_coadd.mask.array[:, :, 0]
+    stars, starmask, _, dstar, x, y = patch_census(
+        gaia, wcs, deep_coadd.bbox, mask0, gsub=gsub, coadd=True,
+        verbose=verbose,
+    )
+    apply = getattr(deep_coadd, 'apply_background', None)
+    if apply is not None:
+        apply(None)
+    with rustfits.FITS(correction_file) as fits:
+        corr = fits['correction'].read()
+        hdr = fits['correction'].header
+        wfrac = fits['wfrac'].read()
+    bb = deep_coadd.bbox
+    x0 = getattr(bb.x, 'start', None)
+    y0 = getattr(bb.y, 'start', None)
+    if x0 is None:
+        x0, y0 = bb.getBeginX(), bb.getBeginY()
+    if (int(hdr['X0']), int(hdr['Y0'])) != (int(x0), int(y0)) \
+            or corr.shape != deep_coadd.image.array.shape:
+        raise ValueError(
+            f'the correction file {correction_file} is for bbox origin '
+            f'({hdr["X0"]}, {hdr["Y0"]}) shape {corr.shape}; the coadd is '
+            f'({x0}, {y0}) shape {deep_coadd.image.array.shape}'
+        )
+    deep_coadd.image.array[:, :] += corr
+    if verbose:
+        print(f'    visit route: correction coadd applied, weight '
+              f'fraction corrected median {float(np.median(wfrac)):.3f}, '
+              f'correction median {float(np.median(corr)):+.2f} nJy')
+    return starmask, make_star_table(stars, []), dstar, None
+
+
 def handle_stars_joint(
     deep_coadd, wcs, gaia, wing, gsub=None,
     spacing=None, prior=None, detect_settings=None,

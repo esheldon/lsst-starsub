@@ -126,6 +126,83 @@ def run_clean(
     )
 
 
+def run_correction(vexp, gaia, tbox, state_name, gsub, correction):
+    """
+    Apply a correction coadd to a patch and measure the profiles.
+
+    The visit route: the clean coadd is the delivered coadd plus the
+    correction plane of lsst-starsub-correction-coadd (the per-visit
+    models coadded), so no fit happens here; the census and star
+    masks are built as run_clean does, and the profiles are measured
+    on the same states so the routes compare directly.  The
+    'residual' and 'flat' states are both the clean coadd (the
+    correction carries the sky and the stars together); the sky
+    written is minus the correction and the star model zero.
+
+    Parameters
+    ----------
+    vexp: VisitExposure
+        The patch image as a visit-like exposure; left corrected
+    gaia: array
+        The Gaia extract
+    tbox: SimpleBox
+        The tract-frame box of the image
+    state_name: str
+        Name of the input state in the tables
+    gsub: float
+        The census depth
+    correction: array
+        The correction plane, the image's shape (nJy)
+
+    Returns
+    -------
+    out: dict
+        As run_clean
+    """
+    from ..census import (
+        field_segmentation, make_star_table, patch_census,
+    )
+    from ..geom import SimpleBox
+    from ..visit.profiles import ambient_levels, measure_profiles
+    from ..visit.exposure import build_wide_star_mask
+
+    delivered = vexp.image.array.copy()
+    mask0 = vexp.mask.array[:, :, 0]
+    stars, starmask, comps, dstar, x, y = patch_census(
+        gaia, vexp.wcs, vexp.bbox, mask0, gsub=gsub,
+    )
+    vexp.image.array[:, :] += correction
+    shape = vexp.image.array.shape
+    vexp.bbox = SimpleBox(0, shape[1], 0, shape[0])
+    residual = vexp.image.array
+    states = {state_name: delivered, 'flat': residual,
+              'residual': residual}
+    seg = field_segmentation(residual, vexp.good, vexp.sky_sigma)
+    wide = build_wide_star_mask(stars, seg.shape)
+    ambient = ambient_levels(states, vexp, seg, wide)
+    print('    ambient levels (nJy): ' + ', '.join(
+        f'{k} {v:.2f}' for k, v in ambient.items()
+    ))
+    edges, ptable = measure_profiles(
+        states, vexp, stars, seg, ambient=ambient,
+    )
+    dedges, dtable = measure_profiles(
+        states, vexp, stars, seg, ambient=ambient, mode='dmask',
+    )
+    res = dict(
+        stars=stars, star_table=make_star_table(stars, []),
+        starmask=starmask, dstar=dstar, delivered=delivered,
+        sky=-correction, star_model=np.zeros(shape, dtype='f4'),
+        fwhm=None,
+    )
+    return dict(
+        res=res, states=states, seg=seg, ambient=ambient,
+        edges=edges, ptable=ptable, dedges=dedges, dtable=dtable,
+        star_table=res['star_table'], truth=None, inj=None,
+        sky_sigma=vexp.sky_sigma, vexp=vexp,
+    )
+
+
 def write_clean_file(stem, out, meta, no_images=False, extra_tables=None):
     """
     Write the clean output file and its summary png.

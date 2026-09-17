@@ -1459,13 +1459,15 @@ coadds.
        pass-2 rerun adds it.  Still to add: a star-model evaluation
        at arbitrary positions for the coadd frame (the wing at the
        transformed star positions).
-    b. Running (launched 2026-09-16): the scheme on the 64 i-band
-       visits of tract 7275 with a pooled template (2025071800489 has
-       none), `scripts/run_tract_visits.sh tract-07275-visits-i.txt i
-       6` -> `scripts/visit_scheme.sh VISIT BAND` per visit, six
-       visits side by side, in `~/oh/starsub-visits/tract-07275/VISIT/`
-       (detectors-inner.txt, the visit wing, pass1/, pass2/,
-       scheme.log).  Per job the profile measurement was three
+    b. Done (2026-09-16, launched and completed the same day): the
+       scheme on the 64 i-band visits of tract 7275 with a pooled
+       template (2025071800489 has none), `scripts/run_tract_visits.sh
+       tract-07275-visits-i.txt i 6` -> `scripts/visit_scheme.sh VISIT
+       BAND` per visit, six visits side by side, in
+       `~/oh/starsub-visits/tract-07275/VISIT/` (detectors-inner.txt,
+       the visit wing, pass1/, pass2/, scheme.log); all 64 complete,
+       13 GB.  The checkout (disks, --diagnostics, the product) is
+       installed since.  Per job the profile measurement was three
        quarters of the time (105 of 138 s on detector 103), so the
        production passes use the new `--no-profiles` (the files keep
        the census, nodes, boxes and maps; no profile tables): 38 s a
@@ -1482,6 +1484,118 @@ coadds.
        `--diagnostics all`; `visit_scheme.sh` still passes
        `--no-profiles` and should drop it after the install.  The
        focal-plane figures need `maps`.
+    d. Steps 3 and 4 built (2026-09-16).  `lsst_starsub.coadd.correction`
+       and `lsst-starsub-correction-coadd`: for every cell of the
+       CellCoadd, each input's correction (the initial background
+       rendered from the stored layers, minus the product's sky, minus
+       its star model with the disks) evaluated at the cell's pixels
+       through the two WCSs, weighted as the CellCoadd weighted the
+       input, summed over the cell's full weight; inputs without a
+       product contribute zero and the corrected weight fraction is
+       recorded.  Output `correction-{tract}-{patch}-{band}.fits`
+       (correction, wfrac, ninput, the stitched coadd with its object
+       background restored, and clean = coadd + correction).  Patch
+       55: 484 cells of 150 px, 16-26 inputs each, 83 inputs from 27
+       visits, 20 min single-threaded.  `lsst-starsub-cell-clean
+       --star-model visit --correction FILE` measures the same
+       profiles the coadd-level routes get (coadd.clean.run_correction)
+       and `scripts/compare_routes.py` stacks the routes side by side.
+       First result (v1, 73 of 83 inputs, 86 percent of the weight):
+       the correction is -6 nJy in the median with +-1.4 nJy over
+       cells and 1.2 nJy rms steps between neighboring cells; the
+       per-star stacks on the coadd (10^-3 coadd sigma, d - r_mask 5
+       to 305 px) for G 15-17: +101 +38 +27 +42 +10 +8 -3 -4 +1, for
+       G 13-15: -104 -38 +9 +29 -22 -85 -53 -39 -52 (14 stars), the
+       far bins carrying the cell steps.  The pedestal: the coadder
+       rendered the background with the visit summary's final
+       calibration, 0.15-0.3 percent below the preliminary photoCalib
+       the loader used, 2-4 nJy per detector; fixed to the loader's.
+       v2 with the fix and 81 of 83 inputs (94 percent of the
+       weight): the correction is +0.3 nJy in the median with 0.5 nJy
+       rms over cells.  Against the coadd-level joint fit run on the
+       same patch (`clean-none-joint-07275-55-i.fits`,
+       `compare-routes-55.png`), the per-star residual stacks (10^-3
+       coadd sigma, d - r_mask 5 to 305 px) are the same within their
+       noise: G 15-17 (35 stars) joint +23 -2 +10 +15 -17 +4 +12 +6
+       -11, visit +9 +14 +22 +14 -8 +1 +16 +10 -15; G 13-15 (14 stars)
+       joint -28 +17 +26 +15 +18 -3 +10 -4 -0, visit -50 -7 +20 +12
+       +27 -1 +20 -0 +7; G 6-13 has 2 stars.  The delivered coadd's
+       wings are +0.1 to +0.6 sigma in the same bins.  At the cell
+       scale (150 px medians with the stars masked) the delivered
+       coadd has 0.73 nJy rms over cells and 0.85 nJy steps between
+       neighbors, the visit route's clean coadd 0.46 and 0.66, the
+       coadd-level residual 0.50 and 0.69: the visit route's sky is as
+       flat as the coadd-level route's and flatter than the
+       pipeline's.  So on this patch the two routes are equivalent at
+       the level the stacks can see; the shear test (step 5) is the
+       discriminating number.
+    e. Step 5 plumbing (2026-09-16): `lsst_starsub.coadd.starsub.
+       handle_stars_correction` (the joint route's contract without a
+       fit: census, masks, apply_background(None), the correction
+       plane added; fit None), and in lsst-mdet `--starsub-method
+       visit --correction-pattern` in cells.load_coadds_butler,
+       lsst-mdet-getimages and lsst-mdet-process-cells (with a new
+       `--bands`, default r,i,z; the redo-bg subtracts only for the
+       template route).  Single-band runs hit a latent bug in
+       lsst_mdet.coadd.coadd_mbobs (it returned the bare Observation
+       for one band where the caller unpacks two); fixed to return
+       (obs, [median weight]) with good_fracs in the meta.  Only the
+       i band has products, so the shear test runs in i alone for
+       both routes: `scripts/compare_mdet.py` matches the two
+       catalogs per metacal step and prints the shape and flux
+       differences against their errors and each route's response
+       and mean shear.  Test runs on cells (10,10), (11,11) in
+       `~/oh/starsub-visits/mdet-test/{joint,visit}-i-7275-55.fits`:
+       124 and 123 rows, 121 matched, and for the 19 matched objects
+       with flags 0 and s2n > 10 the shapes differ by 0.14-0.18 of
+       their errors and T by 0.25; the i flux is 1.4 percent lower
+       on the visit route (55 nJy in the median, 0.4 of the error):
+       the visit route's coadd keeps its +0.3 nJy pedestal (the
+       redo-bg does not subtract for it, as for the joint route),
+       and mdet's fluxes see it.  Two more single-band fixes in
+       lsst-mdet on the way: the cell_meta good_frac vector of
+       length 1 (io._squeeze_unit_fields; the compressed table writer
+       takes vectors of 2 and more) and the color image (3 bands
+       only).  The steps are named ns, 1p, 1m (no 2p/2m), so only
+       R11 is measured.  The full-patch runs of both routes in i
+       (484 cells, one process each, ~1 hour) are in
+       `mdet-test/full/`.
+    f. The shear test on patch 55 (2026-09-16).  Object by object the
+       routes agree: 28,613 of ~29,000 rows matched within 1 px; for
+       the 7718 matched objects with flags 0, g_flags 0 and s2n > 10
+       the shape differences (visit minus joint) are +0.0002 in g1
+       and +0.0004 in g2 in the median, with an rms of 0.057 and a
+       median |difference| of 0.08 of the shape errors, i.e. the same
+       shapes to 8 percent of the noise and no offset at the 0.001
+       level (the error on the median difference is 0.0007).  The
+       sizes T are 0.03 smaller and the i fluxes 2.5 percent lower
+       (101 nJy in the median) on the visit route: the pedestal.  A
+       visit-depth sky (the box medians and mesh with the visit's
+       segmentation) holds the sources below the visit's detection
+       threshold that a coadd-depth sky masks, so the visit route's
+       clean coadd sits ~0.3-0.5 nJy above the coadd-level mesh's zero
+       point, and mdet's fluxes and sizes see it; the shapes do not.
+       The remedy is a coadd-level pedestal (or coarse) term for the
+       visit route after coaddition, measured with the coadd's own
+       segmentation: to add before the routes are compared on fluxes.
+       The per-route response and mean shear from one patch are
+       noise: with ~2000 selected objects the 1p-1m difference has an
+       error of ~0.01 and R11 = (g1p - g1m) / 0.02 an error of ~0.5
+       (the joint run gave 0.15, the visit run 0.83).  A shear bias
+       test at the 10^-3 level needs the injection machinery
+       (lsst-mdet-inject-node, INJECT_SETTINGS) over many patches; on
+       real objects the discriminating statistic is the matched
+       difference above, which is null.  mdet's own star-residual QA
+       on the two runs: max |stack| 0.0087 sigma (joint) and 0.0084
+       (visit) over 143 stars G 15-19.
+       So the coadd test's verdict: the visit route reproduces the
+       coadd-level route's sky, star residuals and shapes on this
+       patch; it does not beat it here, and the patch's brightest
+       star is G 12.3, so the regime where the routes should differ
+       (G < 9 stars, the ghost disks, the trough of the very bright
+       wings) is not exercised.  A patch with a G 6-8 star is the
+       next test target once the far wing and disk are in; the
+       machinery now runs end to end in an hour per patch and band.
     c. A finding from the renderer (2026-09-16): the brightest stars'
        amplitudes are not trustworthy.  On visit 354 the G 5.74 star
        on detector 103 has A = -0.10 +- 0.03 from its own detector in
@@ -1537,6 +1651,23 @@ coadds.
        the sharp edge makes it separable from the mesh) and the
        bright-end wing term from the pooled 64-visit pass-1 data.
        Figure: scratchpad `bright-star-raw-354.png`.
+       [The disk component is in the joint fit since 2026-09-16:
+       `joint.DISK_*`, `disk_column`, `render_disks`; a free disk
+       amplitude D per star brighter than DISK_GMAX (8) whose disk
+       reaches the detector, prior 0.5 about the prediction, carried
+       through the star table, the gather, pass 2 and the product
+       renderers (`disk_model_at`); test `test_ghost_disk_recovered`.
+       On the real G 5.7 star the neighboring detector measures D =
+       1.06 +- 0.03 and A = 0.85 +- 0.17, reproducing the 18.5 nJy
+       plateau, but the star's own detector still lands at A = -0.28
+       with D = 0.87: beyond the disk the data are 2.3, 1.1, 0.5, 0.3
+       nJy at 875-1025 px where the wing model at A = 1 says 5.3,
+       4.7, 4.1, 3.7, ten times too bright, because the pooled cloud
+       the aureole was fit to had the disk plateau in it.  The far
+       wing has to be re-derived with the disk accounted for (the
+       pooled cloud with the disk region and the brightest stars out,
+       or a disk term in the pooled fit).  The tract run predates the
+       disk; the coadd test proceeds with the fit as it stands.]
        The stacked template (`scripts/bright_star_stamps.py` per
        visit: the raw sky with the initial background put back,
        other stars' circles and the segmentation masked, 2800 px
