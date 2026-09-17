@@ -53,6 +53,7 @@ from .exposure import (
     restore_background,
     sky_background,
 )
+from ..joint import disk_level, disk_profile
 
 # the wing cloud: bright stars to FAR_RMAX, the rest to MID_RMAX
 FAR_GMAX = 13.5
@@ -82,6 +83,36 @@ def wing_edges():
     return np.unique(np.round(np.logspace(
         np.log10(R_MIN), np.log10(FAR_RMAX), NBIN_WING + 1,
     )))
+
+
+def disk_annuli(edges, rmid):
+    """
+    Get the ghost disk's mean over each cloud annulus.
+
+    The unit disk (lsst_starsub.joint.disk_profile) averaged over the
+    area of the annulus that holds each cloud radius, so the edge
+    annulus gets its partial coverage.
+
+    Parameters
+    ----------
+    edges: array
+        The annulus edges
+    rmid: array
+        The cloud radii (annulus midpoints)
+
+    Returns
+    -------
+    disk: array
+        The mean unit disk per cloud radius
+    """
+    k = np.clip(np.searchsorted(edges, rmid) - 1, 0, edges.size - 2)
+    out = np.zeros(rmid.size)
+
+    for i, kk in enumerate(k):
+        r = np.linspace(edges[kk], edges[kk + 1], 200)
+        out[i] = np.sum(r * disk_profile(r)) / np.sum(r)
+
+    return out
 
 
 def star_stamps(image, good, seg, x, y, sel, halo):
@@ -407,8 +438,8 @@ KIN_SCAN = np.exp(np.linspace(np.log(0.5), np.log(2.0), 29))
 
 
 def fit_wing_model(
-    prof, prof_err, cloud, rmin=AUR_RMIN, rmax=FAR_RMAX,
-    min_count=AUR_MIN_COUNT,
+    prof, prof_err, cloud, edges=None, disk_amp=0.0, rmin=AUR_RMIN,
+    rmax=FAR_RMAX, min_count=AUR_MIN_COUNT,
 ):
     """
     Fit the two-power-law wing jointly to the stack profile and the cloud.
@@ -418,13 +449,22 @@ def fit_wing_model(
     to rmax):
 
         stack(r) = a r^s1 + b r^s2 + c
-        cloud(r) = k_in (a r^s1 + b r^s2)
+        cloud(r) = k_in (a r^s1 + b r^s2) + d disk(r)
 
     a, b, c linear at each (s1, s2, k_in) of the grids; k_in is
     scanned about its continuity estimate (cloud over stack where
     they overlap).  The single-law stack fit alone cannot give
     the inner law: the cloud is already flatter than the stack's
     22-50 px slope by 50 px, so the two components overlap there.
+
+    The ghost ring (lsst_starsub.joint.disk_profile) scales with
+    the star's flux, so in the flux-normalized cloud it is the same
+    plateau in every G bin; left in, it flattens the aureole and the
+    wing beyond the ring comes out far too bright.  Its level d is
+    held at the band's pooled value (lsst_starsub.joint.disk_level):
+    one visit's cloud cannot separate a plateau from the zero point
+    k_in.  The ring is not part of the wing: the joint fit adds it
+    per star.  The stack is inside the ring.
 
     Parameters
     ----------
@@ -434,6 +474,12 @@ def fit_wing_model(
         Its error (stack_profile_errors)
     cloud: structured array
         From cloud_table
+    edges: array, optional
+        The cloud's annulus edges; with them the ring at disk_amp is
+        removed from the cloud before the fit, without them it is
+        left in
+    disk_amp: float, optional
+        The ring's level, nJy per unit gaia flux (disk_level(band))
     rmin, rmax: float, optional
         The cloud radius range used
     min_count: int, optional
@@ -443,8 +489,8 @@ def fit_wing_model(
     -------
     fit: dict
         slope (s1), ln_a, aur_slope (s2), aur_amp (b), pedestal
-        (c), k_in, k_in0 (the continuity estimate), chi2, npt,
-        chi2_stack, chi2_cloud
+        (c), disk_amp (d, nJy per unit gaia flux), k_in, k_in0 (the
+        continuity estimate), chi2, npt, chi2_stack, chi2_cloud
     """
 
     r0, r1 = STACK_RFIT
@@ -480,6 +526,12 @@ def fit_wing_model(
 
     k0 = float(np.median(yc[over] / np.interp(rc[over], np.arange(
         prof.size), prof)))
+
+    # the ring, at the band's level, comes off the cloud
+    if edges is not None and disk_amp != 0.0:
+        yc = yc - disk_amp * disk_annuli(np.asarray(edges, dtype='f8'), rc)
+    else:
+        disk_amp = 0.0
 
     ws, wc = 1.0 / es, 1.0 / ec
 
@@ -522,7 +574,8 @@ def fit_wing_model(
     return dict(
         slope=float(s1), ln_a=float(np.log(coef[0])),
         aur_slope=float(s2), aur_amp=float(coef[1]),
-        pedestal=float(coef[2]), k_in=float(k_in), chi2=chi2,
+        pedestal=float(coef[2]), disk_amp=disk_amp,
+        k_in=float(k_in), chi2=chi2,
         npt=int(rs.size + rc.size), chi2_stack=chi2_stack,
         chi2_cloud=chi2 - chi2_stack, k_in0=k0,
     )
@@ -622,16 +675,13 @@ def pool_visit(extracts):
 
     cloud = cloud_table(wing, edges)
 
-    fit = fit_wing_model(prof, prof_err, cloud)
-    slope, ln_a, ped = fit['slope'], fit['ln_a'], fit['pedestal']
+    aur = fit_wing_model(prof, prof_err, cloud, edges, disk_level(band))
+    slope, ln_a, ped = aur['slope'], aur['ln_a'], aur['pedestal']
 
-    aur = fit
     tmpl = tmpl - ped
     prof = prof - ped
 
-    cloud['model'] = aur['k_in'] * wing_law(
-        cloud['rmid'], slope, ln_a, aur['aur_slope'], aur['aur_amp'],
-    )
+    cloud['model'] = cloud_model(cloud, edges, aur)
 
     detectors = np.array([
         (e['detector'], e['fwhm'], e['sky_sigma'], e['calib'],
@@ -656,6 +706,7 @@ def pool_visit(extracts):
         nstamp=int(nstamp), nwing=int(wing.size), fwhm=fwhm,
         slope=float(slope), ln_a=float(ln_a), pedestal=float(ped),
         aur_slope=aur['aur_slope'], aur_amp=aur['aur_amp'],
+        disk_amp=aur['disk_amp'],
         k_in=aur['k_in'], k_in0=aur['k_in0'], k_stamp=k_stamp,
         chi2=aur['chi2'],
         npt=aur['npt'], chi2_stack=aur['chi2_stack'],
@@ -666,14 +717,8 @@ def pool_visit(extracts):
 
     print(
         f'    pooled: {nstamp} stamps from {len(extracts)} detectors, '
-        f'fwhm {fwhm:.2f}; joint fit: inner slope {slope:.2f} '
-        f'ln_a {ln_a:.3f} pedestal {ped:.1e}, aureole slope '
-        f'{aur["aur_slope"]:.2f} amp {aur["aur_amp"]:.2e}, k_in '
-        f'{aur["k_in"]:.3e} (continuity {aur["k_in0"]:.3e}, stamps '
-        f'{k_stamp:.3e}); chi2 '
-        f'{aur["chi2_stack"]:.1f} stack + {aur["chi2_cloud"]:.1f} cloud '
-        f'for {aur["npt"]} points, {wing.size} stars; single-law stack '
-        f'slope {slope1:.2f}'
+        f'fwhm {fwhm:.2f}; ' + fit_summary(aur, wing.size)
+        + f'; single-law stack slope {slope1:.2f}'
     )
 
     return dict(
@@ -681,6 +726,121 @@ def pool_visit(extracts):
         prof=prof, prof_err=prof_err, params=params, cloud=cloud,
         wing=wing, detectors=detectors, edges=edges,
     )
+
+
+def cloud_model(cloud, edges, fit):
+    """
+    Evaluate the fitted cloud model, wing plus disk, at the cloud radii.
+
+    Parameters
+    ----------
+    cloud: structured array
+        From cloud_table
+    edges: array
+        The annulus edges
+    fit: dict
+        From fit_wing_model
+
+    Returns
+    -------
+    model: array
+        nJy per unit gaia flux per cloud row
+    """
+    wing = fit['k_in'] * wing_law(
+        cloud['rmid'], fit['slope'], fit['ln_a'], fit['aur_slope'],
+        fit['aur_amp'],
+    )
+    return wing + fit['disk_amp'] * disk_annuli(
+        np.asarray(edges, dtype='f8'), cloud['rmid'].astype('f8'),
+    )
+
+
+def fit_summary(fit, nstars):
+    """
+    One line describing a wing fit.
+
+    Parameters
+    ----------
+    fit: dict
+        From fit_wing_model
+    nstars: int
+        The cloud's star count
+
+    Returns
+    -------
+    text: str
+    """
+    return (
+        f'joint fit: inner slope {fit["slope"]:.2f} ln_a {fit["ln_a"]:.3f} '
+        f'pedestal {fit["pedestal"]:.1e}, aureole slope '
+        f'{fit["aur_slope"]:.2f} amp {fit["aur_amp"]:.2e}, disk '
+        f'{fit["disk_amp"]:.2e} nJy per unit flux, k_in {fit["k_in"]:.3e} '
+        f'(continuity {fit["k_in0"]:.3e}); chi2 {fit["chi2_stack"]:.1f} '
+        f'stack + {fit["chi2_cloud"]:.1f} cloud for {fit["npt"]} points, '
+        f'{nstars} stars'
+    )
+
+
+def refit_template(pooled):
+    """
+    Refit a pooled template from what its file stores.
+
+    The per-star wing cloud, the stack profile and the stack are all
+    in the template file, so a change to the wing fit (the disk
+    term) needs no per-detector extracts: the cloud table and the
+    fit are redone and the template re-extended from the stored
+    stack.  The stored stack and profile already had their pedestal
+    removed; the refit's pedestal is removed again.
+
+    Parameters
+    ----------
+    pooled: dict
+        From read_template_file
+
+    Returns
+    -------
+    pooled: dict
+        As pool_visit returns it, with the refitted params, cloud
+        and template
+    """
+    edges = pooled['edges']
+    wing = pooled['wing']
+    prof = pooled['prof'].astype('f8')
+    prof_err = pooled['prof_err'].astype('f8')
+    stack = pooled['stack'].astype('f8')
+
+    cloud = cloud_table(wing, edges)
+    aur = fit_wing_model(prof, prof_err, cloud, edges,
+                         disk_level(pooled['params']['band']))
+    ped = aur['pedestal']
+    stack = stack - ped
+    prof = prof - ped
+    cloud['model'] = cloud_model(cloud, edges, aur)
+
+    template = extend_template_halo(
+        stack, aur['slope'], aur['ln_a'], aur['aur_slope'],
+        aur['aur_amp'], out_half=TMPL_OUT_MAX + 2,
+    )
+
+    params = dict(pooled['params'])
+    params.update(
+        slope=aur['slope'], ln_a=aur['ln_a'],
+        pedestal=params.get('pedestal', 0.0) + ped,
+        aur_slope=aur['aur_slope'], aur_amp=aur['aur_amp'],
+        disk_amp=aur['disk_amp'], k_in=aur['k_in'], k_in0=aur['k_in0'],
+        chi2=aur['chi2'], npt=aur['npt'], chi2_stack=aur['chi2_stack'],
+        chi2_cloud=aur['chi2_cloud'],
+    )
+
+    print(f'    refit visit {params["visit"]} {params["band"]}: '
+          + fit_summary(aur, wing.size))
+
+    out = dict(pooled)
+    out.update(
+        template=template.astype('f4'), stack=stack.astype('f4'),
+        prof=prof, prof_err=prof_err, params=params, cloud=cloud,
+    )
+    return out
 
 
 def write_template_file(fname, pooled):
@@ -838,8 +998,14 @@ def plot_template(png, pooled):
     w = cloud['glo'] == -1.0
     ax.plot(
         cloud['rmid'][w], cloud['model'][w], 'r-', lw=1.2,
-        label='k_in x halo',
+        label='k_in x halo + disk',
     )
+    damp = p.get('disk_amp', 0.0)
+    if damp != 0.0:
+        rmid = cloud['rmid'][w].astype('f8')
+        disk = damp * disk_annuli(pooled['edges'].astype('f8'), rmid)
+        ax.plot(rmid[disk > 0], disk[disk > 0], 'k--', lw=0.8,
+                label=f'disk {damp:.1e}')
     ax.set_xscale('log')
     ax.set_yscale('log')
     ax.set_xlabel('r [px]')

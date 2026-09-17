@@ -3,6 +3,7 @@ the joint fit's sky mesh: the neighbor-difference operator and the
 smoothness prior filling a node that has no data
 """
 import numpy as np
+import pytest
 
 import lsst_starsub.joint as jmod
 from lsst_starsub.wing import render_canonical_stars
@@ -193,10 +194,13 @@ def test_ghost_disk_recovered():
     image = (sky + rng.normal(size=(n, n))
              + 0.9 * render_canonical_stars((n, n), stars, canonical,
                                             gsub=99.0, verbose=False)
-             + jmod.render_disks((n, n), stars, np.array([d_true])))
+             + jmod.render_disks((n, n), stars, np.array([d_true]), 'i'))
     good = np.hypot(xx - 1000.0, yy - 1050.0) > 300.0
+    with pytest.raises(ValueError):
+        jmod.joint_fit(image, good, stars, canonical, 1.0,
+                       spacing=spacing, gfit=99.0, verbose=False)
     jf = jmod.joint_fit(image, good, stars, canonical, 1.0,
-                        spacing=spacing, gfit=99.0, verbose=False)
+                        spacing=spacing, gfit=99.0, band='i', verbose=False)
     assert jf['disk_free'][0] and jf['free'][0]
     assert abs(jf['A'][0] - 0.9) < 0.05
     assert abs(jf['D'][0] - d_true) < 0.05
@@ -205,7 +209,7 @@ def test_ghost_disk_recovered():
     jf2 = jmod.joint_fit(image, good, stars, canonical, 1.0,
                          spacing=spacing, gfit=-np.inf,
                          amps=np.array([0.9]), disks=np.array([d_true]),
-                         fit_disks=False, verbose=False)
+                         fit_disks=False, band='i', verbose=False)
     assert not jf2['disk_free'][0] and jf2['D'][0] == d_true
     assert np.isnan(jf2['D_err'][0])
     resid = image - jf2['sky'] - jf2['star_model']

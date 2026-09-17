@@ -186,11 +186,14 @@ def test_core_amplitudes_and_visit_wing():
                     aur_amp=0.0),
     )
     canonical = WingModel(r, T)
-    vw = visit_wing(tmpl, canonical)
+    vw, scale = visit_wing(tmpl, canonical)
     assert np.allclose(vw.r, r)
+    # the stack scaled onto the canonical over the match range
+    stack = 3.0 * np.interp(r, np.arange(72.0), prof)
+    m = (r >= 30.0) & (r <= 40.0)
+    assert np.isclose(scale, np.median(T[m] / stack[m]))
     inside = r < R_BLEND
-    assert np.allclose(vw.T[inside], 3.0 * np.interp(r[inside],
-                                                     np.arange(72.0), prof))
+    assert np.allclose(vw.T[inside], scale * stack[inside])
     beyond = r >= R_JOIN
     assert np.allclose(vw.T[beyond], T[beyond])
 
@@ -359,3 +362,47 @@ def test_product_evaluations_match_renderers():
     assert np.allclose(sky_at(p, xx, yy), back + ref, atol=1e-3)
     assert np.isfinite(sky_at(p, np.array([10.3, 339.9]),
                               np.array([0.2, 299.7]))).all()
+
+
+def test_wing_fit_disk_term():
+    """the ghost ring in the cloud comes off at the band's level and
+    the aureole is recovered; left in, the aureole flattens"""
+    from lsst_starsub.joint import disk_level
+    from lsst_starsub.visit.template import (
+        cloud_table, disk_annuli, fit_wing_model, wing_edges, wing_law,
+    )
+
+    rng = np.random.default_rng(3)
+    slope, ln_a, aur_slope, aur_amp, k_in = -4.0, 1.0, -2.2, 1e-3, 4e12
+    disk_amp = disk_level('i')
+    edges = wing_edges()
+    rmid = 0.5 * (edges[1:] + edges[:-1])
+
+    # the stack: the law in template units, 1 percent errors
+    r = np.arange(60.0)
+    prof = wing_law(r, slope, ln_a, aur_slope, aur_amp)
+    prof_err = 0.01 * prof + 1e-9
+    prof = prof + rng.normal(size=r.size) * prof_err
+
+    # the cloud: 400 stars G 9-15, the wing plus the disk per unit
+    # flux, noise from the sky scaled by the flux
+    n = 400
+    G = rng.uniform(9.0, 15.0, n)
+    flux = 10.0 ** (-0.4 * G)
+    truth = k_in * wing_law(rmid, slope, ln_a, aur_slope, aur_amp) \
+        + disk_amp * disk_annuli(edges, rmid)
+    sig = 3e-9 / flux[:, None] / np.sqrt(rmid)[None, :]
+    wing = np.zeros(n, dtype=[('G', 'f4'), ('prof', 'f8', rmid.size)])
+    wing['G'] = G
+    wing['prof'] = truth[None, :] + rng.normal(size=(n, rmid.size)) * sig
+
+    cloud = cloud_table(wing, edges)
+    fit = fit_wing_model(prof, prof_err, cloud, edges, disk_amp)
+    assert fit['disk_amp'] == disk_amp
+    assert abs(fit['aur_slope'] - aur_slope) < 0.11
+    assert abs(fit['k_in'] / k_in - 1) < 0.1
+
+    nodisk = fit_wing_model(prof, prof_err, cloud)
+    assert nodisk['disk_amp'] == 0.0
+    assert nodisk['aur_slope'] >= fit['aur_slope']
+    assert nodisk['chi2'] > 10 * fit['chi2']

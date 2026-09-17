@@ -800,7 +800,7 @@ def handle_stars_visit(
             vexp.image.array, vexp.good & ~starmask, stars, canonical,
             vexp.sky_sigma,
             spacing=SPACING if joint_spacing is None else joint_spacing,
-            variance=vexp.variance.array,
+            variance=vexp.variance.array, band=vexp.band,
             **extra,
         )
         sky += jf['sky']

@@ -59,6 +59,12 @@ def get_args():
         help='pool the saved extracts in {outdir}/extracts-{visit}/ '
              'instead of extracting (no butler access)',
     )
+    parser.add_argument(
+        '--from-template',
+        help='refit this pooled template file (its stored cloud, '
+             'profile and stack) with the current wing fit and write '
+             'the result to {outdir}; no extracts or butler access',
+    )
     return parser.parse_args()
 
 
@@ -184,6 +190,12 @@ def main():
     visit = args.visit
     edir = os.path.join(args.outdir, f'extracts-{visit}')
 
+    if args.from_template:
+        from ..visit.template import read_template_file, refit_template
+        pooled = refit_template(read_template_file(args.from_template))
+        write_pooled(args, pooled)
+        return
+
     if args.from_extracts:
         import glob
         files = sorted(glob.glob(os.path.join(edir, 'extract-*.fits')))
@@ -243,9 +255,24 @@ def pool_and_write(args, extracts):
     extracts: list of dict
         From extract_detector
     """
-    from ..visit.template import plot_template, pool_visit, write_template_file
+    from ..visit.template import pool_visit
 
-    pooled = pool_visit(extracts)
+    write_pooled(args, pool_visit(extracts))
+
+
+def write_pooled(args, pooled):
+    """
+    Write a pooled template's file and png to the output directory.
+
+    Parameters
+    ----------
+    args: argparse.Namespace
+        From get_args
+    pooled: dict
+        From pool_visit or refit_template
+    """
+    from ..visit.template import plot_template, write_template_file
+
     band = pooled['params']['band']
     stem = os.path.join(args.outdir, f'template-{args.visit}-{band}')
     write_template_file(stem + '.fits', pooled)

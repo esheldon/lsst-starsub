@@ -392,6 +392,7 @@ def handle_stars_joint(
         image, good, stars, wing, sky_sigma,
         spacing=spacing, prior_sigma=prior, variance=var,
         detect_settings=detect_settings, verbose=verbose,
+        band=getattr(deep_coadd, 'band', None),
     )
 
     image -= jf['sky']

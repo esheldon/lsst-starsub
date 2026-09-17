@@ -160,8 +160,15 @@ def render_stars(product, wing):
     )
     if 'D' in product.stars.dtype.names:
         model += render_disks(product.shape, product.stars,
-                              product.stars['D'])
+                              product.stars['D'], product_band(product))
     return model
+
+
+def product_band(product):
+    """The band of a product, from its meta."""
+    band = product.meta['band']
+    band = band.decode() if isinstance(band, bytes) else str(band)
+    return band.strip()
 
 
 def disk_model_at(product, x, y):
@@ -188,6 +195,7 @@ def disk_model_at(product, x, y):
         return out
     flat_x, flat_y, flat_out = x.ravel(), y.ravel(), out.ravel()
     rmax = DISK_RADIUS + DISK_EDGE
+    band = product_band(product)
     for xk, yk, gk, dk in zip(stars['x'], stars['y'], stars['G'],
                               stars['D']):
         if not dk > 0:
@@ -199,7 +207,7 @@ def disk_model_at(product, x, y):
         if not sel.any():
             continue
         rr = np.hypot(flat_x[sel] - xk, flat_y[sel] - yk)
-        flat_out[sel] += (float(dk) * float(disk_prediction(gk))
+        flat_out[sel] += (float(dk) * float(disk_prediction(gk, band))
                           * disk_profile(rr))
     return out
 

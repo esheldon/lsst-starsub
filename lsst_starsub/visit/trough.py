@@ -16,6 +16,9 @@ RENDER_RMAX = 3000.0
 # (extend_template_halo's r_blend, r_join)
 R_BLEND = 40.0
 R_JOIN = 44.0
+# the visit's stack is scaled onto the canonical over this range, just
+# inside the junction (visit_wing)
+R_MATCH = (30.0, 40.0)
 
 
 def radial_template(tmpl):
@@ -57,17 +60,23 @@ def radial_template(tmpl):
     return r, T
 
 
-def visit_wing(tmpl, canonical):
+def visit_wing(tmpl, canonical, match=R_MATCH):
     """
     Build a visit's own wing: its stack inside the junction, the canonical
     beyond.
 
     The pooled stack of the visit's unsaturated stars gives the core and
-    inner wing at that visit's seeing, in nJy per unit Gaia flux through
-    the pooled zero point k_in; the far wing is the instrumental
+    inner wing at that visit's seeing; the far wing is the instrumental
     scattering, stable from visit to visit and better known from the
-    survey median.  Blended over R_BLEND-R_JOIN as radial_template blends
-    the stack into the halo law.
+    survey median.  The stack is scaled onto the canonical over the
+    match range just inside the junction (the median ratio), so the
+    two meet: the pooled zero point k_in, fitted with the far cloud,
+    scatters 27 percent across visits against the canonical at 40 px
+    (2026-09-17), and the core amplitudes are measured against this
+    wing inside 12 px, so a zero point off the canonical would put
+    their outer wings off by the same factor.  Blended over
+    R_BLEND-R_JOIN as radial_template blends the stack into the halo
+    law.
 
     Parameters
     ----------
@@ -75,11 +84,16 @@ def visit_wing(tmpl, canonical):
         From lsst_starsub.visit.template.read_template_file
     canonical: WingModel or (r, T)
         The band's canonical wing
+    match: (rlo, rhi), optional
+        The radius range the stack is scaled onto the canonical over;
+        default R_MATCH
 
     Returns
     -------
     wing: WingModel
         On the canonical's radial grid
+    scale: float
+        The factor applied to k_in times the stack
     """
     from ..wing import WingModel, profile_of
 
@@ -87,5 +101,10 @@ def visit_wing(tmpl, canonical):
     r, T = radial_template(tmpl)
     k_in = float(tmpl['params']['k_in'])
     Tv = k_in * np.interp(rc, r, T)
+    sel = (rc >= match[0]) & (rc <= match[1]) & (Tv > 0)
+    if sel.sum() < 2:
+        raise ValueError('visit_wing: no radii in the match range')
+    scale = float(np.median(Tc[sel] / Tv[sel]))
+    Tv = scale * Tv
     frac = np.clip((rc - R_BLEND) / (R_JOIN - R_BLEND), 0.0, 1.0)
-    return WingModel(rc, (1.0 - frac) * Tv + frac * Tc)
+    return WingModel(rc, (1.0 - frac) * Tv + frac * Tc), scale

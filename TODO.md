@@ -1693,6 +1693,77 @@ coadds.
        rendered with the wing; the stack itself, with the wing model
        subtracted, is the empirical shape if a uniform disk proves
        too crude (the 538 px bump).
+    g. The far wing re-derived from the pooled cloud, and two things
+       it exposed (2026-09-17).  The per-visit template files keep
+       every star's flux-normalized wing profile (12-2500 px, 30 log
+       annuli), so the cloud pools over the band's visits without
+       the deleted extracts: 369,813 stars in i (65 visits), 125,254
+       in r (21), 136,937 in z (24); `scripts/pooled_cloud.py` (the
+       per-G-bin medians and the step across the ring edge) and
+       `scripts/canonical_empirical.py` (the combined profile, the
+       fit and the new wing file).  A free disk term in the
+       per-visit fit was tried first (`--from-template` refits a
+       template file in 6 s) and fails: the plateau is degenerate
+       with the zero point k_in over 12-800 px and one visit's
+       G 6-10 stars beyond the ring are zero within 500 nJy per
+       unit flux, so the disk came out -1.7e3.  The pooled cloud
+       instead shows:
+       - The ghost is a ring, not a disk: the pupil's image with the
+         central obscuration.  Combining the G bins per annulus
+         (each bin's far level removed as its sky bias, its first,
+         partly masked annulus dropped) the i profile from 70 to
+         1700 px is one power law r^-2.85 plus a ring from 510 to
+         827 px at 1.35e3 nJy per unit flux: chi2 37 for 18 points,
+         against 111 for a filled disk (the fit prefers 500-520 for
+         the inner radius, 0.62 of the outer, the obscuration; the
+         bright-star stack's bump at 538 px is this inner edge).
+         The step across the outer edge is the same in every G bin,
+         2339 +- 78 (G 6-8) to 2953 +- 669 (G 11-12), so the ring
+         scales with the flux.  Per band the level is 1.36e3 (i),
+         1.19e3 (r) and 3.3e2 (z): `joint.DISK_LEVELS`,
+         `disk_level(band)`, `disk_profile` now the annulus, the
+         band threaded through `disk_prediction`, `render_disks`,
+         `joint_fit(band=)` (required when a G < 8 star reaches the
+         image), the product renderers and the coadd route.  r
+         also carries a flux-proportional excess beyond the ring
+         (450-700 per unit flux at 900-1400 px in all four bright
+         bins, fading by 1600), a second, fainter ghost or halo;
+         the empirical wing holds it.
+       - The old canonical wing (the median of the per-visit
+         two-power-law fits, which had absorbed the ring into the
+         aureole) is 12-16 percent low at 100-160 px, right at
+         190-270, 5-17 percent high at 320-460, and 1.5-3x high
+         beyond the ring, the "ten times" of 10c at the far end for
+         the brightest stars.  The new canonical (`canonical-wing-
+         07275-{i,r,z}.fits`, the old kept as `-v1`): the old
+         inside 50 px (the stack median, which the cloud confirms
+         to 3 percent at 46-65 px), the pooled cloud minus the ring
+         from 65 px to the last annulus measured at 3 sigma (1127
+         px in i, 1346 in r, 660 in z), the fitted law beyond by
+         continuity.  Ratios new/old in i: 1.12 at 100 px, 1.16 at
+         160, 0.95 at 300, 0.82 at 460, 0.69 at 660, 0.66 at 943,
+         0.47 at 1500.  The per-visit fit now removes the ring at
+         the band's level before fitting (`fit_wing_model(...,
+         disk_amp)`), for k_in; its aureole is not used beyond the
+         junction.
+       - The junction was broken.  The visit wing is k_in times the
+         visit's stack inside 40 px and the canonical beyond 44,
+         and k_in, fitted with the far cloud (the scan at its 2x
+         bound on most visits), scatters 27 percent across the 64 i
+         visits against the canonical at 40 px (ratios 0.34-2.0;
+         k_in/k_stamp 0.8-1.6).  The core amplitudes are measured
+         against that wing inside 12 px, so a visit's outer wings
+         were off by its factor for every core-measured star; the
+         cross-visit test of 9e hid it by dividing out "the visit
+         scale".  `visit_wing` now scales the stack onto the
+         canonical over 30-40 px (the median ratio, returned and
+         printed): scales 0.52-3.3, the 2025-09-02 stray-light
+         visits the extremes.  The 64 wing files were regenerated
+         (`wing-{visit}-i.fits`, the old as `-v1`); the pass
+         products of the tract run predate all of this.
+       Next: pass 1 and 2 on the 64 visits with the ring, the new
+       canonical and the continuous junction; then the coadd test
+       on a patch with a G 6-8 star.
 
    What it says for the plan: a single visit does not constrain the
    wing amplitudes of stars fainter than G ~13 (the coadd does);
@@ -1706,6 +1777,11 @@ coadds.
 
 ## Smaller items
 
+- The full-image output of `lsst-starsub-visit` (without
+  `--profiles-only`) writes `gaia_stars` from the census alone (no
+  A_err, free, D), so the gather cannot read it; only the product
+  file carries the joint fields.  Write the same table in both
+  (noticed 2026-09-17).
 - Profiles: reference each state locally or exclude neighbors to their
   wide radius (done in `lsst-starsub-remeasure` and the visit tool);
   the global ambient reference alone leaves the wing carpet of the

@@ -42,10 +42,11 @@ def main():
     args = get_args()
     tmpl = read_template_file(args.template)
     canonical = read_wing_model(args.canonical)
-    wing = visit_wing(tmpl, canonical)
+    wing, scale = visit_wing(tmpl, canonical)
     band = str(tmpl['params']['band'])
     print(f'visit {int(tmpl["params"]["visit"])} {band}: k_in '
-          f'{float(tmpl["params"]["k_in"]):.3e}, fwhm '
+          f'{float(tmpl["params"]["k_in"]):.3e} scaled by {scale:.3f} onto '
+          f'the canonical at the junction, fwhm '
           f'{float(tmpl["params"]["fwhm"]):.2f} arcsec; writing '
           f'{args.outfile}')
     write_canonical_wing(args.outfile, wing.r, wing.T, band, 1)

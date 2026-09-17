@@ -567,24 +567,57 @@ def render_mesh(nodes, values, shape, block=RENDER_BLOCK):
 
 
 # the ghost disk of the bright stars: an out-of-focus pupil image
-# centered on the star, flat inside a sharp edge.  Measured 2026-09-16
-# on 45 stars G < 7.5 of six i-band visits (scripts/bright_star_stack.py):
-# the half-level edge at 827 px, the same in every quadrant and for G <
-# 6.5 and 6.5-7.5, the transition 812 -> 862 px; the level 2.2e3 nJy
-# per unit Gaia flux with a 48 percent spread across stars (the i-band
-# flux against G), so each star's disk gets its own amplitude, with a
-# prior of DISK_PRIOR_SIGMA about the prediction.  The radius is set by
-# the optics, not the band; the level per unit flux may differ per band
+# centered on the star: the pupil's image, a flat ring with the central
+# obscuration dark inside it.  The outer edge from 45 stars G < 7.5 of
+# six i-band visits (scripts/bright_star_stack.py, 2026-09-16): the
+# half level at 827 px, the same in every quadrant and for G < 6.5 and
+# 6.5-7.5, the transition 812 -> 862 px.  The inner edge and the level
+# from the wing cloud pooled over 65 i visits (scripts/pooled_cloud.py
+# and canonical_empirical.py): the wing is one power law r^-2.85 from
+# 80 px out through and beyond the ring, and the ring on top of it
+# starts at 510 px (0.62 of the outer radius, the obscuration) at
+# 1.35e3 nJy per unit Gaia flux; a filled disk fits worse.  The level
+# spreads 48 percent across stars (the i-band flux against G), so each
+# star's ring gets its own amplitude, with a prior of DISK_PRIOR_SIGMA
+# about the prediction.  The radii are set by the optics, not the band;
+# the level per unit flux is per band (the same pooled fit on the 21 r
+# and 24 z visits; the r cloud also carries a fainter, wider excess
+# to 1600 px that the empirical canonical wing holds)
 DISK_RADIUS = 827.0
-DISK_EDGE = 25.0        # px: the edge falls linearly over +- this
+DISK_INNER = 510.0
+DISK_EDGE = 25.0        # px: both edges fall linearly over +- this
 DISK_GMAX = 8.0         # stars brighter than this get a disk column
-DISK_LEVEL = 2.2e3      # nJy per unit Gaia flux, the prediction (D = 1)
+# nJy per unit Gaia flux, the prediction (D = 1), per band
+DISK_LEVELS = {'r': 1.2e3, 'i': 1.35e3, 'z': 3.2e2}
 DISK_PRIOR_SIGMA = 0.5
 
 
-def disk_profile(r, radius=DISK_RADIUS, edge=DISK_EDGE):
+def disk_level(band):
     """
-    The unit disk profile: 1 inside, a linear edge, 0 outside.
+    The ghost ring's level per unit Gaia flux in a band.
+
+    Parameters
+    ----------
+    band: str
+
+    Returns
+    -------
+    level: float
+        nJy per unit Gaia flux (DISK_LEVELS)
+    """
+    band = str(band)
+    if band not in DISK_LEVELS:
+        raise ValueError(
+            f'no ghost ring level for band {band!r}: measure it on the '
+            f'pooled wing cloud (scripts/canonical_empirical.py) and add '
+            f'it to DISK_LEVELS'
+        )
+    return DISK_LEVELS[band]
+
+
+def disk_profile(r, radius=DISK_RADIUS, inner=DISK_INNER, edge=DISK_EDGE):
+    """
+    The unit ghost profile: 1 in the ring, linear edges, 0 elsewhere.
 
     Parameters
     ----------
@@ -595,16 +628,18 @@ def disk_profile(r, radius=DISK_RADIUS, edge=DISK_EDGE):
     -------
     values: array
     """
-    return np.clip((radius + edge - np.asarray(r, dtype='f8')) / (2 * edge),
-                   0.0, 1.0)
+    r = np.asarray(r, dtype='f8')
+    outer = np.clip((radius + edge - r) / (2 * edge), 0.0, 1.0)
+    inner_edge = np.clip((r - inner + edge) / (2 * edge), 0.0, 1.0)
+    return outer * inner_edge
 
 
-def disk_prediction(G):
-    """The disk's predicted level in nJy for a star of Gaia G."""
-    return DISK_LEVEL * 10.0 ** (-0.4 * np.asarray(G, dtype='f8'))
+def disk_prediction(G, band):
+    """The disk's predicted level in nJy for a star of Gaia G in a band."""
+    return disk_level(band) * 10.0 ** (-0.4 * np.asarray(G, dtype='f8'))
 
 
-def disk_column(cy, cx, x, y, G, b=BIN):
+def disk_column(cy, cx, x, y, G, band, b=BIN):
     """
     Evaluate one star's disk at the cell centers of its window.
 
@@ -618,6 +653,8 @@ def disk_column(cy, cx, x, y, G, b=BIN):
         The star's position, pixels
     G: float
         Its Gaia G magnitude
+    band: str
+        The band, for the level
     b: int, optional
         The cell side in px; default BIN
 
@@ -637,13 +674,13 @@ def disk_column(cy, cx, x, y, G, b=BIN):
     if i1 <= i0 or j1 <= j0:
         return np.zeros(0, dtype=int), np.zeros(0)
     rr = np.hypot(cy[i0:i1, j0:j1] - y, cx[i0:i1, j0:j1] - x)
-    vals = float(disk_prediction(G)) * disk_profile(rr)
+    vals = float(disk_prediction(G, band)) * disk_profile(rr)
     w = vals > 0
     ii, jj = np.nonzero(w)
     return (ii + i0) * mx + (jj + j0), vals[w]
 
 
-def render_disks(shape, stars, D):
+def render_disks(shape, stars, D, band):
     """
     Render the stars' ghost disks, in nJy.
 
@@ -654,6 +691,8 @@ def render_disks(shape, stars, D):
         The census, with x, y and G
     D: array
         Per star, the disk amplitude (1 the prediction); 0 for no disk
+    band: str
+        The band, for the level
 
     Returns
     -------
@@ -671,7 +710,7 @@ def render_disks(shape, stars, D):
         y0, y1 = max(0, iy - m), min(ny, iy + m + 1)
         if x1 <= x0 or y1 <= y0:
             continue
-        level = float(dk) * float(disk_prediction(gk))
+        level = float(dk) * float(disk_prediction(gk, band))
         dx = np.arange(x0, x1, dtype='f8') - float(xk)
         dy = np.arange(y0, y1, dtype='f8') - float(yk)
         for r0 in range(0, dy.size, RENDER_BLOCK):
@@ -768,6 +807,7 @@ def joint_fit(
     free=None,
     disks=None,
     fit_disks=True,
+    band=None,
     verbose=True,
 ):
     """
@@ -840,6 +880,9 @@ def joint_fit(
         Fit the disk amplitudes of the stars brighter than DISK_GMAX
         whose disk reaches the image and has cells (default); False
         pins every disk to disks
+    band: str, optional
+        The band, for the disks' level (disk_level); required when a
+        star brighter than DISK_GMAX reaches the image
     verbose: bool, optional
         Print the per-pass summaries
 
@@ -926,11 +969,13 @@ def joint_fit(
         if disk_center.shape != (stars.size,):
             raise ValueError('disks must have one value per census star')
     D = np.where(has_disk, disk_center, 0.0)
+    if has_disk.any() and band is None:
+        raise ValueError('joint_fit needs the band for the ghost disks')
     disk_free = has_disk & bool(fit_disks)
     disk_idx, disk_vals = {}, {}
     for si in np.flatnonzero(disk_free):
         idx, v = disk_column(cy, cx, float(x[si]), float(y[si]),
-                             float(G[si]), b=b)
+                             float(G[si]), band, b=b)
         if idx.size == 0 or not has_cells.ravel()[idx].any():
             disk_free[si] = False
         else:
@@ -950,7 +995,8 @@ def joint_fit(
         )
     pinned_disk = has_disk & ~disk_free
     if pinned_disk.any():
-        work -= render_disks(image.shape, stars[pinned_disk], D[pinned_disk])
+        work -= render_disks(image.shape, stars[pinned_disk],
+                             D[pinned_disk], band)
 
     # the columns of the free stars at the cell centers
     ncell = cy.size
@@ -1085,7 +1131,8 @@ def joint_fit(
             verbose=False,
         )
         if has_disk.any():
-            resid += render_disks(image.shape, stars[has_disk], D[has_disk])
+            resid += render_disks(image.shape, stars[has_disk],
+                                  D[has_disk], band)
 
         np.subtract(image, resid, out=resid)
 
@@ -1130,7 +1177,8 @@ def joint_fit(
         verbose=False,
     )
     if has_disk.any():
-        model_full += render_disks(image.shape, stars[has_disk], D[has_disk])
+        model_full += render_disks(image.shape, stars[has_disk],
+                                   D[has_disk], band)
 
     return dict(
         A=A,
