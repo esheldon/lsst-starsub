@@ -1698,7 +1698,7 @@ coadds.
        every star's flux-normalized wing profile (12-2500 px, 30 log
        annuli), so the cloud pools over the band's visits without
        the deleted extracts: 369,813 stars in i (65 visits), 125,254
-       in r (21), 136,937 in z (24); `scripts/pooled_cloud.py` (the
+       in r (21), 136,937 in z (24); `scripts/pooled_wings.py` (the
        per-G-bin medians and the step across the ring edge) and
        `scripts/canonical_empirical.py` (the combined profile, the
        fit and the new wing file).  A free disk term in the

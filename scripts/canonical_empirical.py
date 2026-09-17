@@ -1,18 +1,18 @@
 """
-The canonical wing of a band from the pooled wing cloud.
+The canonical wing of a band from the pooled per-star wing profiles.
 
 The per-visit fits describe the far wing with two power laws and,
 until the ghost ring was known, absorbed the ring into the aureole:
 the median of those fits (canonical_from_templates.py) is 15
 percent low at 100-160 px, 17 percent high at 460 px and two to
-four times too bright beyond the ring.  The cloud pooled over the
+four times too bright beyond the ring.  The wing profiles pooled over the
 band's visits (every star's flux-normalized profile from the
 template files) measures the wing directly: one power law from 80
 px out through and beyond the ring, with the ring on top.
 
 The new wing keeps the old canonical inside R_LO px (the stack
-median over visits, which the cloud confirms to 3 percent), takes
-the pooled cloud minus the ring at the band's level
+median over visits, which the wing profiles confirm to 3 percent), takes
+the pooled wing profiles minus the ring at the band's level
 (lsst_starsub.joint.disk_level) from R_HI out to R_FAR px or the
 last annulus still measured at MIN_SNR, and the fitted power law
 beyond, joined by continuity.  Prints the ring level and wing slope
@@ -30,14 +30,14 @@ import rustfits
 from lsst_starsub.joint import (
     DISK_EDGE, DISK_INNER, DISK_RADIUS, disk_level, disk_profile,
 )
-from lsst_starsub.visit.template import cloud_median
+from lsst_starsub.visit.template import wing_bin_median
 from lsst_starsub.wing import read_canonical_wing, write_canonical_wing
 
 GBINS = [(6, 8), (8, 9), (9, 10), (10, 11), (11, 12), (12, 13.5),
          (13.5, 15.5)]
 PEDESTAL_RMIN = 1400.0   # each bin's far level comes off as its sky bias
-R_LO, R_HI = 50.0, 65.0  # the old canonical inside, blended to the cloud
-R_FAR = 1600.0           # the cloud to here, the fitted power law beyond
+R_LO, R_HI = 50.0, 65.0  # the old canonical inside, blended to the profiles
+R_FAR = 1600.0           # the profiles to here, the fitted power law beyond
 MIN_SNR = 3.0            # ... or to the last annulus this well measured
 FIT_RANGE = (70.0, 1700.0)
 
@@ -67,7 +67,7 @@ def pooled_profile(files):
     rmid = 0.5 * (edges[1:] + edges[:-1])
     num, den = np.zeros(rmid.size), np.zeros(rmid.size)
     for glo, ghi in GBINS:
-        med, err, _ = cloud_median(wing, edges, glo, ghi)
+        med, err, _ = wing_bin_median(wing, edges, glo, ghi)
         ok = np.isfinite(med) & (err > 0)
         if not ok.any():
             continue
@@ -101,7 +101,7 @@ def main():
     tdir, band, old, new, png = sys.argv[1:6]
     files = sorted(glob.glob(os.path.join(tdir, f'template-*-{band}.fits')))
     edges, rmid, prof, err, nstar = pooled_profile(files)
-    print(f'{band}: {len(files)} visits, {nstar} stars in the cloud')
+    print(f'{band}: {len(files)} visits, {nstar} stars in the wing profiles')
     DISK_LEVEL = disk_level(band)
 
     fit = fit_law_and_ring(edges, rmid, prof, err)
@@ -111,7 +111,7 @@ def main():
           f'{DISK_EDGE:.0f}); chi2 {fit["chi2"]:.1f} for {fit["npt"]} '
           f'points {FIT_RANGE[0]:.0f}-{FIT_RANGE[1]:.0f} px')
 
-    # the cloud minus the ring, corrected from annulus means to
+    # the wing profiles minus the ring, corrected from annulus means to
     # midpoint values by the fitted law's ratio
     def law(r):
         return fit['amp'] * np.asarray(r, dtype='f8') ** fit['slope']
@@ -122,7 +122,7 @@ def main():
     emp_err = err * corr
     ok = (np.isfinite(emp) & (rmid >= R_LO) & (rmid <= R_FAR) & (emp > 0)
           & (emp > MIN_SNR * emp_err))
-    # the cloud out to the last well measured annulus, contiguous
+    # the wing profiles out to the last well measured annulus, contiguous
     last = np.flatnonzero(ok)[0]
     while last + 1 < rmid.size and ok[last + 1]:
         last += 1
@@ -130,16 +130,16 @@ def main():
     r_far = rmid[last]
 
     r, T_old = read_canonical_wing(old)
-    T_cloud = np.exp(np.interp(np.log(r), np.log(rmid[ok]), np.log(emp[ok])))
-    # continuity into the law beyond the cloud
+    T_emp = np.exp(np.interp(np.log(r), np.log(rmid[ok]), np.log(emp[ok])))
+    # continuity into the law beyond the wing profiles
     scale = emp[last] / law(r_far)
     T_law = scale * law(r)
-    T = np.where(r <= r_far, T_cloud, T_law)
+    T = np.where(r <= r_far, T_emp, T_law)
     frac = np.clip((r - R_LO) / (R_HI - R_LO), 0.0, 1.0)
     T = (1.0 - frac) * T_old + frac * T
     write_canonical_wing(new, r, T, band, len(files))
-    print(f'  wrote {new}; the cloud to {r_far:.0f} px, the law beyond '
-          f'scaled by {scale:.3f}')
+    print(f'  wrote {new}; the wing profiles to {r_far:.0f} px, the law '
+          f'beyond scaled by {scale:.3f}')
     for rr in (50, 100, 160, 300, 460, 660, 943, 1500, 2500):
         j = np.argmin(np.abs(r - rr))
         print(f'  {rr:5d} px: old {T_old[j]:10.1f} new {T[j]:10.1f} '
@@ -152,9 +152,9 @@ def main():
     ax = axes[0]
     pos = np.isfinite(prof) & (prof > 0)
     ax.errorbar(rmid[pos], prof[pos], yerr=err[pos], fmt='k.', ms=4,
-                capsize=2, label='pooled cloud')
+                capsize=2, label='pooled wing profiles')
     ax.errorbar(rmid[ok], emp[ok], yerr=emp_err[ok], fmt='b.', ms=4,
-                capsize=2, label='cloud minus ring')
+                capsize=2, label='wing profiles minus ring')
     ax.plot(r[r > 10], T_old[r > 10], 'r-', lw=1, label='old canonical')
     ax.plot(r[r > 10], T[r > 10], 'g-', lw=1, label='new canonical')
     ax.plot(r[r > 10], T[r > 10] + DISK_LEVEL * disk_profile(r[r > 10]),
@@ -168,7 +168,7 @@ def main():
     ax = axes[1]
     ax.errorbar(rmid[ok], emp[ok] / np.interp(rmid[ok], r, T_old),
                 yerr=emp_err[ok] / np.interp(rmid[ok], r, T_old), fmt='b.',
-                ms=4, capsize=2, label='(cloud minus ring) / old')
+                ms=4, capsize=2, label='(profiles minus ring) / old')
     ax.plot(r[r > 10], T[r > 10] / T_old[r > 10], 'g-', lw=1,
             label='new / old')
     ax.axhline(1, color='k', lw=0.5)

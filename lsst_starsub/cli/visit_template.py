@@ -61,8 +61,9 @@ def get_args():
     )
     parser.add_argument(
         '--from-template',
-        help='refit this pooled template file (its stored cloud, '
-             'profile and stack) with the current wing fit and write '
+        help='refit this pooled template file (its stored per-star wing '
+             'profiles, stack profile and stack) with the current wing '
+             'fit and write '
              'the result to {outdir}; no extracts or butler access',
     )
     return parser.parse_args()

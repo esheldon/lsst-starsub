@@ -572,8 +572,9 @@ def render_mesh(nodes, values, shape, block=RENDER_BLOCK):
 # six i-band visits (scripts/bright_star_stack.py, 2026-09-16): the
 # half level at 827 px, the same in every quadrant and for G < 6.5 and
 # 6.5-7.5, the transition 812 -> 862 px.  The inner edge and the level
-# from the wing cloud pooled over 65 i visits (scripts/pooled_cloud.py
-# and canonical_empirical.py): the wing is one power law r^-2.85 from
+# from the per-star wing profiles pooled over 65 i visits
+# (scripts/pooled_wings.py and canonical_empirical.py): the wing is
+# one power law r^-2.85 from
 # 80 px out through and beyond the ring, and the ring on top of it
 # starts at 510 px (0.62 of the outer radius, the obscuration) at
 # 1.35e3 nJy per unit Gaia flux; a filled disk fits worse.  The level
@@ -581,7 +582,7 @@ def render_mesh(nodes, values, shape, block=RENDER_BLOCK):
 # star's ring gets its own amplitude, with a prior of DISK_PRIOR_SIGMA
 # about the prediction.  The radii are set by the optics, not the band;
 # the level per unit flux is per band (the same pooled fit on the 21 r
-# and 24 z visits; the r cloud also carries a fainter, wider excess
+# and 24 z visits; the r profiles also carries a fainter, wider excess
 # to 1600 px that the empirical canonical wing holds)
 DISK_RADIUS = 827.0
 DISK_INNER = 510.0
@@ -609,8 +610,8 @@ def disk_level(band):
     if band not in DISK_LEVELS:
         raise ValueError(
             f'no ghost ring level for band {band!r}: measure it on the '
-            f'pooled wing cloud (scripts/canonical_empirical.py) and add '
-            f'it to DISK_LEVELS'
+            f'pooled per-star wing profiles (scripts/canonical_empirical.py) '
+            f'and add it to DISK_LEVELS'
         )
     return DISK_LEVELS[band]
 

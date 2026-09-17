@@ -365,11 +365,11 @@ def test_product_evaluations_match_renderers():
 
 
 def test_wing_fit_disk_term():
-    """the ghost ring in the cloud comes off at the band's level and
+    """the ghost ring in the wing profiles comes off at the band's level and
     the aureole is recovered; left in, the aureole flattens"""
     from lsst_starsub.joint import disk_level
     from lsst_starsub.visit.template import (
-        cloud_table, disk_annuli, fit_wing_model, wing_edges, wing_law,
+        binned_wings, disk_annuli, fit_wing_model, wing_edges, wing_law,
     )
 
     rng = np.random.default_rng(3)
@@ -384,7 +384,7 @@ def test_wing_fit_disk_term():
     prof_err = 0.01 * prof + 1e-9
     prof = prof + rng.normal(size=r.size) * prof_err
 
-    # the cloud: 400 stars G 9-15, the wing plus the disk per unit
+    # the wing profiles: 400 stars G 9-15, the wing plus the disk per unit
     # flux, noise from the sky scaled by the flux
     n = 400
     G = rng.uniform(9.0, 15.0, n)
@@ -396,13 +396,13 @@ def test_wing_fit_disk_term():
     wing['G'] = G
     wing['prof'] = truth[None, :] + rng.normal(size=(n, rmid.size)) * sig
 
-    cloud = cloud_table(wing, edges)
-    fit = fit_wing_model(prof, prof_err, cloud, edges, disk_amp)
+    binned = binned_wings(wing, edges)
+    fit = fit_wing_model(prof, prof_err, binned, edges, disk_amp)
     assert fit['disk_amp'] == disk_amp
     assert abs(fit['aur_slope'] - aur_slope) < 0.11
     assert abs(fit['k_in'] / k_in - 1) < 0.1
 
-    nodisk = fit_wing_model(prof, prof_err, cloud)
+    nodisk = fit_wing_model(prof, prof_err, binned)
     assert nodisk['disk_amp'] == 0.0
     assert nodisk['aur_slope'] >= fit['aur_slope']
     assert nodisk['chi2'] > 10 * fit['chi2']

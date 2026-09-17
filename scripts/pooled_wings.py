@@ -1,5 +1,5 @@
 """
-The wing cloud pooled over the visits of a band.
+The per-star wing profiles pooled over the visits of a band.
 
 Every star's flux-normalized wing profile from the per-visit
 template files (the wing extension), pooled and medianed per G bin
@@ -7,7 +7,7 @@ and radius, against the canonical wing and the ghost disk.  The
 question is the wing beyond the disk edge and the disk level per G
 bin, which one visit cannot measure.
 
-usage: python pooled_cloud.py TEMPLATEDIR BAND OUT.png [CANONICAL.fits]
+usage: python pooled_wings.py TEMPLATEDIR BAND OUT.png [CANONICAL.fits]
 """
 import glob
 import os
@@ -18,7 +18,7 @@ import numpy as np
 import rustfits
 
 from lsst_starsub.joint import disk_level
-from lsst_starsub.visit.template import cloud_median, disk_annuli
+from lsst_starsub.visit.template import wing_bin_median, disk_annuli
 from lsst_starsub.wing import read_canonical_wing
 
 GBINS = [(6, 8), (8, 9), (9, 10), (10, 11), (11, 12), (12, 13.5)]
@@ -48,7 +48,7 @@ ax, ax2 = axes
 unit_disk = disk_annuli(edges, rmid)
 rows = []
 for glo, ghi in GBINS:
-    med, err, count = cloud_median(wing, edges, glo, ghi)
+    med, err, count = wing_bin_median(wing, edges, glo, ghi)
     ok = np.isfinite(med)
     pos = ok & (med > 0)
     line = ax.errorbar(rmid[pos], med[pos], yerr=err[pos], fmt='.', ms=4,
@@ -82,7 +82,8 @@ ax.set_xscale('log')
 ax.set_yscale('log')
 ax.set_xlabel('r [px]')
 ax.set_ylabel('nJy per unit Gaia flux')
-ax.set_title(f'{band}: pooled cloud, {len(files)} visits (x: negative)')
+ax.set_title(f'{band}: pooled wing profiles, {len(files)} visits '
+             f'(x: negative)')
 ax.legend(fontsize=7)
 ax2.axhline(0, color='k', lw=0.5)
 ax2.axvline(827, color='k', lw=0.5, ls=':')

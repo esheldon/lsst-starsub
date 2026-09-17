@@ -70,7 +70,7 @@ def visit_wing(tmpl, canonical, match=R_MATCH):
     scattering, stable from visit to visit and better known from the
     survey median.  The stack is scaled onto the canonical over the
     match range just inside the junction (the median ratio), so the
-    two meet: the pooled zero point k_in, fitted with the far cloud,
+    two meet: the pooled zero point k_in, fitted with the far wing profiles,
     scatters 27 percent across visits against the canonical at 40 px
     (2026-09-17), and the core amplitudes are measured against this
     wing inside 12 px, so a zero point off the canonical would put
