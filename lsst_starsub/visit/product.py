@@ -165,8 +165,8 @@ def render_stars(product, wing):
 
 
 def product_band(product):
-    """The band of a product, from its meta."""
-    band = product.meta['band']
+    """The band of a product, from its meta (a one-row table)."""
+    band = np.asarray(product.meta['band']).ravel()[0]
     band = band.decode() if isinstance(band, bytes) else str(band)
     return band.strip()
 

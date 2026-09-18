@@ -406,3 +406,16 @@ def test_wing_fit_disk_term():
     assert nodisk['disk_amp'] == 0.0
     assert nodisk['aur_slope'] >= fit['aur_slope']
     assert nodisk['chi2'] > 10 * fit['chi2']
+
+
+def test_product_band_from_meta_table():
+    """the band comes out of the one-row meta table as a plain string"""
+    from lsst_starsub.visit.product import Product, product_band
+
+    p = Product()
+    p.meta = np.zeros(1, dtype=[('band', 'U1'), ('visit', 'i8')])
+    p.meta['band'] = 'z'
+    assert product_band(p) == 'z'
+    p.meta = np.zeros(1, dtype=[('band', 'S2')])
+    p.meta['band'] = b'r '
+    assert product_band(p) == 'r'

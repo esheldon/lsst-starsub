@@ -1761,9 +1761,57 @@ coadds.
          visits the extremes.  The 64 wing files were regenerated
          (`wing-{visit}-i.fits`, the old as `-v1`); the pass
          products of the tract run predate all of this.
-       Next: pass 1 and 2 on the 64 visits with the ring, the new
-       canonical and the continuous junction; then the coadd test
-       on a patch with a G 6-8 star.
+       The rerun of pass 1 and 2 on the 64 visits with all three
+       (2026-09-17, 06:38 to 12:50): 9891 detectors, every job
+       completed, none preempted, 1.5 GB of products.  Slurm gives
+       the preemptable QOS about 60 concurrent slots and the jobs
+       take 64 s on average, with as many jobs in the scheduler's
+       prolog and completing states as running, so the pace was ten
+       visits an hour: pack ~8 detectors per job for the r and z
+       runs (`visit_pass_jobs.py`; the resubmission keys on missing
+       outputs, not jobs).  On detector 103 of visit 354 the G 5.74
+       star, at A = -0.1 in every earlier run, fits A = 1.117 +-
+       0.037 with its ring at D = 1.60; the G 11-14 free stars move
+       5-10 percent with the wing at 100-160 px; the core-measured
+       stars are unchanged on this visit (junction scale 1.005).
+       The coadd test on patch 54, the G 6.97 star (the tract's
+       others: patch 21 G 6.41, 67 G 6.95, 20 G 7.60, 88 G 7.82),
+       `~/oh/starsub-visits/coadd-test/54/`: the correction coadd
+       (484 cells, 82 inputs, 78 with a product, weight fraction
+       corrected 1.00 median, 0.88 minimum; correction +0.45 nJy
+       median, 16-84 -0.8 to +1.3, the cores of the masked stars
+       its extremes), the visit-route clean and the coadd-level
+       joint route on the same patch (`compare-routes-54.png`).
+       The star sits 430 px from the patch's bottom edge, so half
+       its ring is on the patch.  In annuli around it with the star
+       masks out (coadd sigma units; 330-510, 510-827 and 827-1100
+       px): the delivered coadd +0.29 to -0.16 inside, -0.02 to
+       -0.10 on the ring, -0.18 to -0.25 beyond, i.e. the ring's
+       +0.15 sigma step is there; the joint route +0.07 to +0.14
+       everywhere (flat, a pedestal); the visit route +0.06, -0.02
+       to +0.05, +0.02 to +0.05: both remove the ring, the visit
+       route nearer zero (`ring-54.png`).  The per-star stacks (10^-3
+       coadd sigma, d - r_mask 5 to 305 px) are again the same
+       within noise: G 6-13 (4 stars) joint -10 +19 -16 +25 -26 +18
+       -44 -3 -12, visit +14 +12 +3 -4 -15 +14 -41 -8 -1; G 13-15
+       (10) joint +67 -5 -49 -1 -14 -33 -57 -23 -15, visit +69 -7
+       -56 +6 -14 -22 -30 -12 +18; G 15-17 (37) joint +1 +15 +18 -6
+       -12 -34 +17 -14 -11, visit +17 +32 +7 -1 -6 -13 +3 -5 -12.
+       At the cell scale (150 px medians, stars masked, robust
+       rms; the plain rms is set by one extended source of 3 x 3
+       cells at +3 nJy in every state): delivered 0.99 nJy over
+       cells and 0.95 between neighbors, joint 0.43 and 0.64, visit
+       0.39 and 0.60 (`cells-54.png`), the same ordering as patch
+       55.  The star's per-visit fits from the gathers: A median
+       0.92 (16-84 0.75-1.04) over 28 visits, D median 1.04
+       (0.93-1.20), so the ring level and the disk prior hold on a
+       G 7 star.  The coadd-level joint fit gives it A = 0.76.
+       Verdict: with the ring in both routes, the visit route is
+       as good as the coadd-level one on the brightest star of the
+       tract's covered patches and slightly flatter at the cell
+       scale; the regime where they separate, if anywhere, is
+       fainter than this test can see (the shear test of 10f found
+       nothing at 0.08 sigma on patch 55).
 
    What it says for the plan: a single visit does not constrain the
    wing amplitudes of stars fainter than G ~13 (the coadd does);
