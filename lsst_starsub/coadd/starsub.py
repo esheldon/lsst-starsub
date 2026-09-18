@@ -348,7 +348,9 @@ def handle_stars_joint(
         gsub, chi2, ncell, sky_sigma, shape, bg_restored and the
         wing, for make_fit_tables; diffuse, the bool mask of the
         large diffuse segments left to the sky fit (joint_fit), for
-        the caller to mask; nwing, the number of fainter stars
+        the caller to mask; big_sources, the sep table of the last
+        segmentation's large sources, for the large-galaxy mask
+        (lsst_starsub.galaxies); nwing, the number of fainter stars
         whose wings were subtracted, and the settings of that step
         (wing_gmax, wing_rin, wing_rout, wing_core_rap)
     """
@@ -426,6 +428,7 @@ def handle_stars_joint(
         bg_restored=bg_restored,
         wing=wing,
         diffuse=jf['diffuse'],
+        big_sources=jf['big_sources'],
         nwing=nwing,
         wing_gmax=WING_GMAX,
         wing_rin=WING_RIN,

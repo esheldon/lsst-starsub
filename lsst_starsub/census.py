@@ -81,7 +81,7 @@ def circle_radius(gmag):
 
 
 def select_stars(gaia, x, y, mask0, gsub=GSUB, verbose=True,
-                 intruder_gmax=None, intruder_margin=None):
+                 intruder_gmax=None, intruder_margin=None, sat_gmax=None):
     """
     Select the census: on-patch stars saturated or brighter than gsub.
 
@@ -90,6 +90,14 @@ def select_stars(gaia, x, y, mask0, gsub=GSUB, verbose=True,
     No RUWE guard: Gaia at these depths is essentially pure point
     sources, and high-RUWE binaries are still stars we want gone.
     Referred to as "the subtract-and-mask census" in various places.
+
+    The saturation test reads the mask, so on a visit a star fainter
+    than GSAT that saturates in good seeing is still in the census.
+    With sat_gmax the test is only applied to stars brighter than
+    that: on a coadd the saturation bits differ between the bands,
+    and a census that depends on them would differ too, while the
+    coadd routes need one census for every band (patch_census passes
+    GSAT + 0.5 for coadds, the census of the v0.2.0 runs).
 
     Parameters
     ----------
@@ -111,6 +119,9 @@ def select_stars(gaia, x, y, mask0, gsub=GSUB, verbose=True,
         Intruders within this many px of the image; a callable is
         given the star's G and returns the margin, so the wings can
         set it (e.g. a multiple of circle_radius).  Default STAR_MARGIN
+    sat_gmax: float, optional
+        Only stars brighter than this are tested for saturation;
+        default None, every on-image star
 
     Returns
     -------
@@ -122,6 +133,8 @@ def select_stars(gaia, x, y, mask0, gsub=GSUB, verbose=True,
         intruder_gmax = GSAT
     if intruder_margin is None:
         intruder_margin = STAR_MARGIN
+    if sat_gmax is None:
+        sat_gmax = np.inf
 
     ny, nx = mask0.shape
     sat = (mask0 & DM_SAT) != 0
@@ -144,8 +157,11 @@ def select_stars(gaia, x, y, mask0, gsub=GSUB, verbose=True,
             # get a tighter test so a neighbor's bleed trail does not
             # flag them
             m = 5 if gmag < GSAT + 0.5 else 2
-            is_sat = sat[max(0, iy - m):iy + m + 1,
-                         max(0, ix - m):ix + m + 1].any()
+            is_sat = (
+                gmag < sat_gmax
+                and sat[max(0, iy - m):iy + m + 1,
+                        max(0, ix - m):ix + m + 1].any()
+            )
             if not (is_sat or gmag < gsub):
                 continue
         else:
@@ -197,7 +213,9 @@ def patch_census(gaia, wcs, bbox, mask0, gsub=GSUB, coadd=False, verbose=True,
     gsub: float, optional
         Census depth
     coadd: bool, optional
-        See build_star_mask
+        See build_star_mask; also limits the saturation test to
+        stars brighter than GSAT + 0.5, so the census is the same in
+        every band (select_stars sat_gmax)
     verbose: bool, optional
         Print the census and masked fraction
     intruder_gmax, intruder_margin: optional
@@ -218,6 +236,7 @@ def patch_census(gaia, wcs, bbox, mask0, gsub=GSUB, coadd=False, verbose=True,
     stars = select_stars(
         gaia, x, y, mask0, gsub=gsub, verbose=verbose,
         intruder_gmax=intruder_gmax, intruder_margin=intruder_margin,
+        sat_gmax=GSAT + 0.5 if coadd else None,
     )
 
     starmask, comps = build_star_mask(

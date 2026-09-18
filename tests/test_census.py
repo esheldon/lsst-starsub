@@ -94,3 +94,18 @@ def test_select_stars_saturation_from_mask():
     stars = select_stars(gaia, x, y, mask0, gsub=19.0, verbose=False)
     by_x = {int(s['x']): int(s['is_sat']) for s in stars}
     assert by_x == {100: 1, 200: 0, 300: 0}
+
+    # the coadd rule: the saturation test only for the stars brighter
+    # than sat_gmax, so the census does not depend on the band's
+    # saturation bits; the faint saturated star is in the census by
+    # its magnitude (gsub) but not flagged, and drops out when it is
+    # fainter than gsub
+    stars = select_stars(gaia, x, y, mask0, gsub=19.0, verbose=False,
+                         sat_gmax=GSAT + 0.5)
+    by_x = {int(s['x']): int(s['is_sat']) for s in stars}
+    assert by_x == {100: 0, 200: 0, 300: 0}
+    stars = select_stars(gaia, x, y, mask0, gsub=GSAT, verbose=False,
+                         sat_gmax=GSAT + 0.5)
+    assert stars.size == 0
+    stars = select_stars(gaia, x, y, mask0, gsub=GSAT, verbose=False)
+    assert stars.size == 1 and int(stars['x'][0]) == 100

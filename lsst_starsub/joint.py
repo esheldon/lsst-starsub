@@ -141,7 +141,8 @@ def deep_segmentation(
     sig,
     grow=SEG_GROW,
     return_diffuse=False,
-    detect_settings=None
+    detect_settings=None,
+    return_big=False,
 ):
     """
     Segment the sources with the metadetection detection settings.
@@ -171,6 +172,11 @@ def deep_segmentation(
     detect_settings: dict, optional
         The detection settings, thresh, kernel_fwhm, pixel_scale and
         minarea; default DETECT_SETTINGS
+    return_big: bool, optional
+        Also return the sep table of the large sources, the ones of
+        at least SEG_BIG_NPIX px that are not diffuse: their
+        centroids and moment ellipses (x, y, a, b, theta) and areas
+        (npix), for the large-galaxy mask (lsst_starsub.galaxies)
 
     Returns
     -------
@@ -179,6 +185,8 @@ def deep_segmentation(
     region: bool array
         With return_diffuse only: the diffuse segments left to the
         sky fit (none when SEG_DIFFUSE_MEDIAN is None)
+    big: structured array
+        With return_big only: the large sources
     """
     from scipy import ndimage
 
@@ -211,10 +219,13 @@ def deep_segmentation(
 
     grow_big_sources(det, objs)
 
+    out = (det,)
     if return_diffuse:
-        return det, region
+        out += (region,)
+    if return_big:
+        out += (objs[objs['npix'] >= SEG_BIG_NPIX],)
 
-    return det
+    return out if len(out) > 1 else det
 
 
 def _extract(imf, sig, mask, detect_settings=None):
@@ -899,7 +910,9 @@ def joint_fit(
         node_err (their 1 sigma, priors included), ncell, chi2 (per
         cell), diffuse (full res bool: the large diffuse segments the
         last segmentation left to the sky fit; none with
-        SEG_DIFFUSE_MEDIAN None or a single pass)
+        SEG_DIFFUSE_MEDIAN None or a single pass), big_sources (the
+        sep table of the last segmentation's large sources, see
+        deep_segmentation return_big; None with a single pass)
     """
     from scipy import sparse
     from .wing import render_canonical_stars
@@ -1048,6 +1061,7 @@ def joint_fit(
     # the good pixels
     seg_excl = np.zeros(image.shape, dtype=bool)
     diffuse = np.zeros(image.shape, dtype=bool)
+    big_sources = None
     A = prior_center.copy()
 
     for ipass in range(npass):
@@ -1137,12 +1151,13 @@ def joint_fit(
 
         np.subtract(image, resid, out=resid)
 
-        seg_excl, diffuse = deep_segmentation(
+        seg_excl, diffuse, big_sources = deep_segmentation(
             resid,
             good,
             sky_sigma,
             return_diffuse=True,
             detect_settings=detect_settings,
+            return_big=True,
         )
 
         del resid
@@ -1196,4 +1211,5 @@ def joint_fit(
         ncell=ncell,
         chi2=chi2,
         diffuse=diffuse,
+        big_sources=big_sources,
     )
