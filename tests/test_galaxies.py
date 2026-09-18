@@ -164,6 +164,31 @@ def test_galaxy_mask_floor():
     assert mask[400, 400 + 280] and not mask[400 + 120, 400]
 
 
+def test_catalog_exclusion():
+    """
+    the sky-fit exclusion: every catalog galaxy's D25 ellipse scaled
+    by GAL_SKY_SCALE, matched or not
+    """
+    gals = np.zeros(2, dtype=gmod.GALAXY_DTYPE)
+    gals['pgc'] = [1, 2]
+    gals['d25_arcmin'] = [1.0, 0.5]      # 150 and 75 px semi-major
+    gals['logr25'] = [0.0, np.log10(2.0)]
+    gals['pa'] = [np.nan, 90.0]          # round; major axis along x
+    x, y = np.array([200.0, 600.0]), np.array([200.0, 600.0])
+
+    excl = gmod.catalog_exclusion(gals, x, y, (800, 800), scale=2.0)
+    assert excl is not None and excl.dtype == bool
+    # round, 300 px radius
+    assert excl[200, 200 + 290] and excl[200 + 290, 200]
+    assert not excl[200, 200 + 310]
+    # q 0.5 along y: 150 px along x, 75 along y
+    assert excl[600, 600 + 140] and not excl[600, 600 + 160]
+    assert excl[600 + 70, 600] and not excl[600 + 85, 600]
+
+    assert gmod.catalog_exclusion(gals[:0], x[:0], y[:0], (10, 10)) is None
+    assert gmod.catalog_exclusion(None, None, None, (10, 10)) is None
+
+
 def test_galaxy_mask_needs_positions():
     with pytest.raises(TypeError):
         gmod.galaxy_mask({}, None, None, None)

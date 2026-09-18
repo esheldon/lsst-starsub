@@ -821,6 +821,7 @@ def joint_fit(
     fit_disks=True,
     band=None,
     verbose=True,
+    seg_good=None,
 ):
     """
     Fit the star amplitudes, the ghost disks and the sky mesh together.
@@ -897,6 +898,13 @@ def joint_fit(
         star brighter than DISK_GMAX reaches the image
     verbose: bool, optional
         Print the per-pass summaries
+    seg_good: bool array, optional
+        The pixels the source segmentation may use; default good.
+        The caller can keep regions out of the fit (good) that the
+        segmentation should still see, e.g. the catalog galaxies
+        (coadd.starsub.handle_stars_joint galaxies): their light
+        stays out of the sky fit, while their sources are still
+        found and measured (big_sources, for the large-galaxy mask)
 
     Returns
     -------
@@ -923,6 +931,13 @@ def joint_fit(
 
     if variance is not None:
         good &= np.isfinite(variance) & (variance > 0)
+
+    if seg_good is None:
+        seg_good = good
+    else:
+        seg_good = seg_good & np.isfinite(image)
+        if variance is not None:
+            seg_good &= np.isfinite(variance) & (variance > 0)
 
     x, y, G = stars['x'], stars['y'], stars['G'].astype('f8')
 
@@ -1153,7 +1168,7 @@ def joint_fit(
 
         seg_excl, diffuse, big_sources = deep_segmentation(
             resid,
-            good,
+            seg_good,
             sky_sigma,
             return_diffuse=True,
             detect_settings=detect_settings,

@@ -53,6 +53,15 @@ GAL_RMAX = 1500.0
 GAL_MATCH_FRAC = 0.5
 GAL_MATCH_MIN = 25.0
 
+# the catalog D25 ellipse scaled by this is kept out of the sky fit
+# (catalog_exclusion): the joint fit's own exclusion of large sources
+# is capped at joint.SEG_BIG_RMAX px, and the outer light of a galaxy
+# larger than that is fit as sky and subtracted, a dark halo around
+# it (IC 5078, 3.5 arcmin).  The catalog sizes err small, so the
+# factor is generous; the mesh under the excluded region follows its
+# smoothness prior
+GAL_SKY_SCALE = 2.0
+
 PIXEL_SCALE = 0.2   # arcsec per px
 
 GALAXY_DTYPE = [
@@ -259,6 +268,47 @@ def catalog_ellipse(gal):
     if not np.isfinite(pa):
         pa = 0.0
     return a, a * q, np.deg2rad(90.0 - pa)
+
+
+def catalog_exclusion(gals, x, y, shape, scale=GAL_SKY_SCALE):
+    """
+    Get the region of the catalog galaxies to keep out of the sky fit.
+
+    The union of the galaxies' D25 ellipses (catalog_ellipse) scaled
+    by scale; every catalog galaxy in the patch contributes, matched
+    to a source or not, since the fit has not run yet.
+
+    Parameters
+    ----------
+    gals: structured array
+        From read_galaxy_file
+    x, y: arrays
+        Their pixel positions (galaxy_pixel_positions)
+    shape: (ny, nx)
+        The image shape
+    scale: float, optional
+        Default GAL_SKY_SCALE
+
+    Returns
+    -------
+    mask: bool array or None
+        None without galaxies
+    """
+    import sep
+
+    if gals is None or gals.size == 0:
+        return None
+
+    mask = np.zeros(shape, dtype=bool)
+    for k in range(gals.size):
+        a, b, theta = catalog_ellipse(gals[k])
+        sep.mask_ellipse(
+            mask, np.array([x[k]]), np.array([y[k]]),
+            np.array([scale * a]), np.array([scale * b]),
+            np.array([theta]), r=1.0,
+        )
+
+    return mask if mask.any() else None
 
 
 def galaxy_mask(starsub_fits, gals, x, y, shape, scale=GAL_SCALE,

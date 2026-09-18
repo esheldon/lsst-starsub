@@ -297,7 +297,7 @@ def handle_stars_correction(deep_coadd, wcs, gaia, correction_file,
 def handle_stars_joint(
     deep_coadd, wcs, gaia, wing, gsub=None,
     spacing=None, prior=None, detect_settings=None,
-    verbose=True,
+    verbose=True, galaxies=None,
 ):
     """
     Subtract the stars and the sky of a patch coadd with the joint fit.
@@ -335,6 +335,13 @@ def handle_stars_joint(
         lsst_starsub.joint.DETECT_SETTINGS
     verbose: bool, optional
         Print the census and fit summaries
+    galaxies: (gals, x, y), optional
+        The catalog galaxies of the patch (lsst_starsub.galaxies
+        read_galaxy_file) with their pixel positions; their D25
+        ellipses scaled by galaxies.GAL_SKY_SCALE are kept out of
+        the sky fit like the star masks (catalog_exclusion), so the
+        mesh does not fit the outer light of a galaxy larger than
+        the fit's own capped exclusion as sky.  Default none
 
     Returns
     -------
@@ -388,6 +395,20 @@ def handle_stars_joint(
     good = (np.isfinite(var) & (var > 0) & ((mask0 & DM_NO_DATA) == 0)
             & ~starmask)
 
+    # the segmentation still sees the catalog galaxies, so their
+    # sources are measured for the mask; only the fit does not
+    seg_good = good
+    if galaxies is not None:
+        from ..galaxies import catalog_exclusion
+        gals, gx, gy = galaxies
+        excl = catalog_exclusion(gals, gx, gy, image.shape)
+        if excl is not None:
+            good = good & ~excl
+            if verbose:
+                print(f'    {gals.size} catalog galaxies: '
+                      f'{excl.mean() * 100:.2f} percent of the image '
+                      f'kept out of the sky fit')
+
     sky_sigma = float(np.sqrt(np.median(var[good])))
 
     jf = joint_fit(
@@ -395,6 +416,7 @@ def handle_stars_joint(
         spacing=spacing, prior_sigma=prior, variance=var,
         detect_settings=detect_settings, verbose=verbose,
         band=getattr(deep_coadd, 'band', None),
+        seg_good=seg_good,
     )
 
     image -= jf['sky']
