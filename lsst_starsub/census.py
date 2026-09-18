@@ -30,8 +30,24 @@ from .maskbits import DM_INTRP, DM_NO_DATA, DM_SAT
 # 56 saturated stars in 3 patches
 MASK_R15 = 45.0     # circle radius in px at G = 15
 MASK_SLOPE = 0.115  # radius scales as 10^(slope * (15 - G))
+# px: cap on the law.  Its calibrators were G 9-15 and the cap guards
+# the extrapolation; it bites only above G 6.3.  The cap is also what
+# the joint fit can live with: a hole of 900 px (tried 2026-09-19 on
+# the G 4-5 stars of the run-dp2-v01 region) lets the unsupported
+# sky-mesh nodes run away and the field outside came out 3 sigma
+# low, while the 450 px hole with the ghost-disk term fits to +-0.1
+# sigma.  The larger mask those stars need in the OUTPUT is
+# disk_mask_radius, applied after the fit
 MASK_RMAX = 450.0
 MINRAD = 20.0       # circle floor. subtracted cores never show
+# the ghost disk of the brightest stars (lsst_starsub.joint.DISK_RADIUS
+# 827 px with DISK_EDGE 25) is fit but not trusted in the output: the
+# flat template leaves rings at both edges of a G 4 star's disk that
+# make blend groups.  Stars brighter than DISK_MASK_GMAX get an output
+# mask of at least DISK_MASK_RADIUS (add_disk_masks, after the fit);
+# G < 6 is ~300 stars over DP2, 2.5 deg^2
+DISK_MASK_GMAX = 6.0
+DISK_MASK_RADIUS = 900.0
 STAR_MARGIN = 210   # off-patch stars whose wings still intrude
 GSAT = 15.2         # G saturation threshold of these coadds
 GSUB = 19.0         # subtract stars brighter than this
@@ -58,7 +74,9 @@ def circle_radius(gmag):
     Get the mask circle radius of a star from its magnitude.
 
     MASK_R15 at G = 15, scaled as 10^(MASK_SLOPE (15 - G)), floored at
-    MINRAD and capped at MASK_RMAX.
+    MINRAD and capped at MASK_RMAX.  This is the mask the fits see;
+    the output mask of the brightest stars is larger
+    (disk_mask_radius).
 
     Parameters
     ----------
@@ -78,6 +96,73 @@ def circle_radius(gmag):
         ),
         MASK_RMAX,
     )
+
+
+def disk_mask_radius(gmag):
+    """
+    Get the output mask radius of a star: circle_radius, or at least
+    DISK_MASK_RADIUS for the stars brighter than DISK_MASK_GMAX,
+    whose ghost disk is masked whole in the output.
+
+    Parameters
+    ----------
+    gmag: float or array
+        Gaia G magnitude
+
+    Returns
+    -------
+    radius: float or array
+        In pixels, the shape of gmag
+    """
+    gmag = np.asarray(gmag, dtype='f8')
+    rad = np.asarray(circle_radius(gmag), dtype='f8')
+    rad = np.where(
+        gmag < DISK_MASK_GMAX, np.maximum(rad, DISK_MASK_RADIUS), rad,
+    )
+    return rad if rad.ndim else float(rad)
+
+
+def add_disk_masks(starmask, stars):
+    """
+    Grow the star mask to the output radius of the brightest stars.
+
+    A circle of disk_mask_radius around every census star brighter
+    than DISK_MASK_GMAX (on the image or not: an off-image star's
+    disk can reach in) is added to a copy of the mask.  Called after
+    the fits, which use the circle_radius mask.
+
+    Parameters
+    ----------
+    starmask: bool array
+        The mask of the circle_radius circles (build_star_mask)
+    stars: structured array
+        The census (select_stars), with x, y, G
+
+    Returns
+    -------
+    mask, nstar: bool array, int
+        The grown mask (the input when no star qualifies) and the
+        number of stars grown
+    """
+    bright = np.flatnonzero(stars['G'] < DISK_MASK_GMAX)
+    if bright.size == 0:
+        return starmask, 0
+
+    ny, nx = starmask.shape
+    mask = starmask.copy()
+    for k in bright:
+        rad = float(disk_mask_radius(float(stars['G'][k])))
+        x, y = float(stars['x'][k]), float(stars['y'][k])
+        x0 = int(max(0, np.floor(x - rad)))
+        x1 = int(min(nx, np.ceil(x + rad) + 1))
+        y0 = int(max(0, np.floor(y - rad)))
+        y1 = int(min(ny, np.ceil(y + rad) + 1))
+        if x1 <= x0 or y1 <= y0:
+            continue
+        yy, xx = np.mgrid[y0:y1, x0:x1]
+        mask[y0:y1, x0:x1] |= (xx - x) ** 2 + (yy - y) ** 2 <= rad ** 2
+
+    return mask, int(bright.size)
 
 
 def select_stars(gaia, x, y, mask0, gsub=GSUB, verbose=True,

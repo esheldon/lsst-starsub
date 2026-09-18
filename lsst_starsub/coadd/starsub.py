@@ -361,7 +361,10 @@ def handle_stars_joint(
         whose wings were subtracted, and the settings of that step
         (wing_gmax, wing_rin, wing_rout, wing_core_rap)
     """
-    from ..census import GSUB, make_star_table, patch_census
+    from ..census import (
+        DISK_MASK_GMAX, DISK_MASK_RADIUS, GSUB, add_disk_masks,
+        make_star_table, patch_census,
+    )
     from ..joint import GFIT, PRIOR_SIGMA, SPACING, joint_fit
     from ..maskbits import DM_NO_DATA
 
@@ -425,6 +428,17 @@ def handle_stars_joint(
                                  verbose=verbose)
     star_table = make_star_table(stars, [])
     star_table['A'] = jf['A']
+
+    # the output mask of the brightest stars covers their ghost disk,
+    # which the fit modeled but whose edges it leaves rings at
+    starmask, ngrown = add_disk_masks(starmask, stars)
+    if ngrown > 0:
+        from scipy import ndimage
+        dstar = ndimage.distance_transform_edt(~starmask)
+        if verbose:
+            print(f'    {ngrown} stars brighter than G {DISK_MASK_GMAX:g}: '
+                  f'output mask grown to their ghost disk '
+                  f'({DISK_MASK_RADIUS:.0f} px)')
 
     if verbose:
         nfree = int(jf['free'].sum())

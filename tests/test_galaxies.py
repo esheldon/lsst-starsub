@@ -82,6 +82,15 @@ def test_match_and_ellipse():
     assert gmod.match_big_source(None, 100.0, 100.0, 1.0) is None
     assert gmod.match_big_source(big[:0], 100.0, 100.0, 1.0) is None
 
+    # a merged or clipped segment: the centroid is far from the
+    # catalog position but the isophotal ellipse (a_iso 226 px along
+    # x, 56 along y) contains it
+    merged = big_table([(500.0, 500.0, 80.0, 20.0, 0.0, 40000)])
+    assert gmod.in_source_ellipse(merged[0], 700.0, 500.0)
+    assert not gmod.in_source_ellipse(merged[0], 500.0, 700.0)
+    assert gmod.match_big_source(merged, 700.0, 500.0, 1.0) == 0
+    assert gmod.match_big_source(merged, 500.0, 700.0, 1.0) is None
+
     a, b, theta = gmod.source_ellipse(big[0], scale=2.0, rmax=1e9)
     riso = np.sqrt(3000 / np.pi)
     assert np.isclose(a, 2.0 * riso / np.sqrt(0.5))

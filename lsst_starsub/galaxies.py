@@ -32,8 +32,10 @@ import numpy as np
 # arcmin: catalog galaxies at least this large are candidates.  The
 # mask size comes from the data, so a candidate that turns out small
 # in the image costs nothing; the threshold only bounds the catalog
-# work
-D25MIN = 0.5
+# work.  0.3 takes the whole of the HyperLEDA extract (D25 > 0.32'):
+# on the run-dp2-v01 region galaxies of D25 0.36-0.49' still made
+# blend groups of 50-75 objects
+D25MIN = 0.3
 
 # the mask ellipse's semi-major axis in units of the matched source's
 # isophotal semi-major axis.  The segmentation is at the detection
@@ -178,19 +180,47 @@ def galaxy_pixel_positions(gals, wcs, bbox):
     return x - bbox.x.start, y - bbox.y.start
 
 
+def in_source_ellipse(src, x, y, scale=1.0):
+    """
+    Whether a position lies inside a source's isophotal ellipse.
+
+    Parameters
+    ----------
+    src: one row of the sep table
+    x, y: float
+        The position
+    scale: float, optional
+        Scale on the ellipse; default 1, the isophote itself
+
+    Returns
+    -------
+    inside: bool
+    """
+    a, b, theta = source_ellipse(src, scale=scale, rmax=np.inf)
+    dx, dy = x - float(src['x']), y - float(src['y'])
+    c, s = np.cos(theta), np.sin(theta)
+    u = c * dx + s * dy
+    v = -s * dx + c * dy
+    return (u / a) ** 2 + (v / b) ** 2 <= 1.0
+
+
 def match_big_source(big, x, y, d25_arcmin):
     """
     Find the large source at a galaxy's position.
 
     The nearest of the sources whose centroid is within
     GAL_MATCH_FRAC x D25/2 (at least GAL_MATCH_MIN px) of the
-    position.
+    position, or, failing that, the nearest of the sources whose
+    isophotal ellipse contains the position: a segment merged with a
+    neighbor (a pair of ellipticals) or clipped by the patch edge (a
+    galaxy centered just off the patch) has its centroid well away
+    from the catalog position while its isophote still covers it.
 
     Parameters
     ----------
     big: structured array
         The sep table of the large sources (joint.deep_segmentation
-        return_big), with x, y
+        return_big), with x, y, a, b, theta, npix
     x, y: float
         The galaxy's pixel position
     d25_arcmin: float
@@ -207,9 +237,16 @@ def match_big_source(big, x, y, d25_arcmin):
     r25 = d25_arcmin * 60 / PIXEL_SCALE / 2
     rmatch = max(GAL_MATCH_MIN, GAL_MATCH_FRAC * r25)
     d = np.hypot(big['x'] - x, big['y'] - y)
-    k = int(np.argmin(d))
+    order = np.argsort(d)
+    k = int(order[0])
+    if d[k] <= rmatch:
+        return k
 
-    return k if d[k] <= rmatch else None
+    for k in order:
+        if in_source_ellipse(big[k], x, y):
+            return int(k)
+
+    return None
 
 
 def source_ellipse(src, scale=GAL_SCALE, rmax=GAL_RMAX):

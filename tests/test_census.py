@@ -33,6 +33,43 @@ def test_diffuse_mask_none():
     assert diffuse_mask({'r': {}}, 20) is None
 
 
+def test_circle_radius_and_disk_mask():
+    from lsst_starsub.census import (
+        DISK_MASK_GMAX, DISK_MASK_RADIUS, MASK_R15, MASK_RMAX, MASK_SLOPE,
+        MINRAD, add_disk_masks, circle_radius, disk_mask_radius,
+    )
+
+    law = lambda g: MASK_R15 * 10 ** (MASK_SLOPE * (15.0 - g))  # noqa: E731
+    # the fit mask: the capped law
+    assert circle_radius(15.0) == MASK_R15
+    assert circle_radius(21.0) == MINRAD
+    assert np.isclose(circle_radius(6.5), law(6.5))
+    assert circle_radius(3.5) == MASK_RMAX
+    # the output mask: the ghost-disk floor for the brightest stars
+    assert disk_mask_radius(DISK_MASK_GMAX - 0.1) == DISK_MASK_RADIUS
+    g = DISK_MASK_GMAX + 0.1
+    assert disk_mask_radius(g) == circle_radius(g)
+    r = disk_mask_radius(np.array([15.0, 5.0]))
+    assert r.shape == (2,) and r[0] == MASK_R15 and r[1] == DISK_MASK_RADIUS
+    assert isinstance(disk_mask_radius(15.0), float)
+
+    # add_disk_masks grows the mask around the bright stars only,
+    # clipped to the image, and leaves the input alone
+    stars = np.zeros(2, dtype=[('x', 'f8'), ('y', 'f8'), ('G', 'f4')])
+    stars['x'] = [100.0, 1500.0]
+    stars['y'] = [1000.0, 1000.0]
+    stars['G'] = [4.0, 12.0]
+    mask0 = np.zeros((2000, 2000), dtype=bool)
+    mask, n = add_disk_masks(mask0, stars)
+    assert n == 1 and not mask0.any()
+    assert mask[1000, 100 + 890] and not mask[1000, 100 + 910]
+    assert mask[1000 + 890, 100] and mask[1000, 0]
+    assert not mask[1000, 1500]
+    # no bright star: the same array back
+    mask, n = add_disk_masks(mask0, stars[1:])
+    assert n == 0 and mask is mask0
+
+
 def test_select_stars_intruders():
     from lsst_starsub.census import (
         GSAT, STAR_MARGIN, circle_radius, select_stars,
