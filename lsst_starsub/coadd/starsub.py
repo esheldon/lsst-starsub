@@ -82,10 +82,10 @@ def core_amplitudes(image, good, x, y, G, wing, rap):
     """
     Measure each star's wing amplitude from its core.
 
-    The flux in the pixels within rap px of the star over the model's
-    flux in the same pixels at amplitude 1 (the Gaia prediction).  1
-    where the aperture leaves the image or holds a pixel that is not
-    good, or where the ratio falls outside WING_AMP_RANGE.
+    lsst_starsub.wing.core_amplitudes with the WING_AMP_RANGE guard:
+    the flux within rap px over the model's, 1 where the aperture
+    leaves the image or holds a pixel that is not good, or where the
+    ratio falls outside WING_AMP_RANGE.
 
     Parameters
     ----------
@@ -105,33 +105,10 @@ def core_amplitudes(image, good, x, y, G, wing, rap):
     amps: array
         The amplitudes, 1 the prediction
     """
+    from ..wing import core_amplitudes as measure
 
-    ny, nx = image.shape
-
-    m = int(np.ceil(rap)) + 1
-    amps = np.ones(len(x))
-
-    for k, (xk, yk, gk) in enumerate(zip(x, y, G)):
-        ix, iy = int(round(xk)), int(round(yk))
-
-        if ix - m < 0 or iy - m < 0 or ix + m >= nx or iy + m >= ny:
-            continue
-
-        sl = np.s_[iy - m:iy + m + 1, ix - m:ix + m + 1]
-        yy, xx = np.mgrid[iy - m:iy + m + 1, ix - m:ix + m + 1]
-        rr = np.hypot(xx - xk, yy - yk)
-        ap = rr <= rap
-
-        if not good[sl][ap].all():
-            continue
-
-        r, T = wing.profile(float(gk))
-        model = 10.0 ** (-0.4 * gk) * np.interp(rr[ap], r, T).sum()
-        a = image[sl][ap].sum() / model
-
-        if WING_AMP_RANGE[0] <= a <= WING_AMP_RANGE[1]:
-            amps[k] = a
-
+    amps, _, _ = measure(image, good, x, y, G, wing, rap,
+                         amp_range=WING_AMP_RANGE)
     return amps
 
 
@@ -247,10 +224,80 @@ def load_wing(fname):
     return wing
 
 
+def handle_stars_correction(deep_coadd, wcs, gaia, correction_file,
+                            gsub=None, verbose=True):
+    """
+    The visit route on a patch coadd: apply the correction coadd.
+
+    The contract of handle_stars_joint, without a fit: the census and
+    star masks are built as there, the stored object background is
+    restored (apply_background(None)), and the correction plane of
+    lsst-starsub-correction-coadd (the per-visit sky and star models
+    coadded with the coadd's own weights) is added in place.  The
+    coadd is then sky-flat and star-free to the extent the per-visit
+    products are; nothing is fit here.
+
+    Parameters
+    ----------
+    deep_coadd: the patch coadd (image, mask, variance, bbox,
+        apply_background as the joint route expects)
+    wcs: ButlerWcs or FileWcs
+    gaia: array
+        The Gaia extract
+    correction_file: str
+        The correction coadd file of this patch and band; its X0, Y0
+        must match the coadd's bbox
+    gsub: float, optional
+        The census depth; default GSUB
+    verbose: bool, optional
+
+    Returns
+    -------
+    starmask, star_table, dstar, fit:
+        As handle_stars_joint; fit is None (no mesh, no amplitudes:
+        the products carry them per visit)
+    """
+    import rustfits
+    from ..census import GSUB, make_star_table, patch_census
+
+    if gsub is None:
+        gsub = GSUB
+    mask0 = deep_coadd.mask.array[:, :, 0]
+    stars, starmask, _, dstar, x, y = patch_census(
+        gaia, wcs, deep_coadd.bbox, mask0, gsub=gsub, coadd=True,
+        verbose=verbose,
+    )
+    apply = getattr(deep_coadd, 'apply_background', None)
+    if apply is not None:
+        apply(None)
+    with rustfits.FITS(correction_file) as fits:
+        corr = fits['correction'].read()
+        hdr = fits['correction'].header
+        wfrac = fits['wfrac'].read()
+    bb = deep_coadd.bbox
+    x0 = getattr(bb.x, 'start', None)
+    y0 = getattr(bb.y, 'start', None)
+    if x0 is None:
+        x0, y0 = bb.getBeginX(), bb.getBeginY()
+    if (int(hdr['X0']), int(hdr['Y0'])) != (int(x0), int(y0)) \
+            or corr.shape != deep_coadd.image.array.shape:
+        raise ValueError(
+            f'the correction file {correction_file} is for bbox origin '
+            f'({hdr["X0"]}, {hdr["Y0"]}) shape {corr.shape}; the coadd is '
+            f'({x0}, {y0}) shape {deep_coadd.image.array.shape}'
+        )
+    deep_coadd.image.array[:, :] += corr
+    if verbose:
+        print(f'    visit route: correction coadd applied, weight '
+              f'fraction corrected median {float(np.median(wfrac)):.3f}, '
+              f'correction median {float(np.median(corr)):+.2f} nJy')
+    return starmask, make_star_table(stars, []), dstar, None
+
+
 def handle_stars_joint(
     deep_coadd, wcs, gaia, wing, gsub=None,
     spacing=None, prior=None, detect_settings=None,
-    verbose=True,
+    verbose=True, galaxies=None,
 ):
     """
     Subtract the stars and the sky of a patch coadd with the joint fit.
@@ -288,6 +335,13 @@ def handle_stars_joint(
         lsst_starsub.joint.DETECT_SETTINGS
     verbose: bool, optional
         Print the census and fit summaries
+    galaxies: (gals, x, y), optional
+        The catalog galaxies of the patch (lsst_starsub.galaxies
+        read_galaxy_file) with their pixel positions; their D25
+        ellipses scaled by galaxies.GAL_SKY_SCALE are kept out of
+        the sky fit like the star masks (catalog_exclusion), so the
+        mesh does not fit the outer light of a galaxy larger than
+        the fit's own capped exclusion as sky.  Default none
 
     Returns
     -------
@@ -301,11 +355,16 @@ def handle_stars_joint(
         gsub, chi2, ncell, sky_sigma, shape, bg_restored and the
         wing, for make_fit_tables; diffuse, the bool mask of the
         large diffuse segments left to the sky fit (joint_fit), for
-        the caller to mask; nwing, the number of fainter stars
+        the caller to mask; big_sources, the sep table of the last
+        segmentation's large sources, for the large-galaxy mask
+        (lsst_starsub.galaxies); nwing, the number of fainter stars
         whose wings were subtracted, and the settings of that step
         (wing_gmax, wing_rin, wing_rout, wing_core_rap)
     """
-    from ..census import GSUB, make_star_table, patch_census
+    from ..census import (
+        DISK_MASK_GMAX, DISK_MASK_RADIUS, GSUB, STAR_MARGIN, add_disk_masks,
+        disk_mask_radius, make_star_table, patch_census,
+    )
     from ..joint import GFIT, PRIOR_SIGMA, SPACING, joint_fit
     from ..maskbits import DM_NO_DATA
 
@@ -316,10 +375,19 @@ def handle_stars_joint(
     if prior is None:
         prior = PRIOR_SIGMA
 
+    # the off-patch intruders: the usual STAR_MARGIN, but a star
+    # brighter than DISK_MASK_GMAX counts from as far as its output
+    # mask radius, so its wing, ghost disk and output mask are all
+    # handled on the patches its halo reaches (zeta Cap, G 3.5, off
+    # 05889-00093 with its halo on it: unmodeled, the patch never
+    # finished, 2026-09-19)
+    def intruder_margin(gmag):
+        return max(STAR_MARGIN, disk_mask_radius(gmag))
+
     mask0 = deep_coadd.mask.array[:, :, 0]
     stars, starmask, _, dstar, x, y = patch_census(
         gaia, wcs, deep_coadd.bbox, mask0, gsub=gsub, coadd=True,
-        verbose=verbose,
+        verbose=verbose, intruder_margin=intruder_margin,
     )
 
     apply = getattr(deep_coadd, 'apply_background', None)
@@ -339,12 +407,31 @@ def handle_stars_joint(
     good = (np.isfinite(var) & (var > 0) & ((mask0 & DM_NO_DATA) == 0)
             & ~starmask)
 
+    # the segmentation still sees the catalog galaxies, so their
+    # sources are measured for the mask; only the fit does not
+    seg_good = good
+    if galaxies is not None:
+        from ..galaxies import catalog_exclusion
+        gals, gx, gy = galaxies
+        excl = catalog_exclusion(gals, gx, gy, image.shape)
+        if excl is not None:
+            good = good & ~excl
+            if verbose:
+                print(f'    {gals.size} catalog galaxies: '
+                      f'{excl.mean() * 100:.2f} percent of the image '
+                      f'kept out of the sky fit')
+
     sky_sigma = float(np.sqrt(np.median(var[good])))
 
+    # the bright intruders get their amplitude fit on the wing they
+    # put on the image rather than the pinned prediction
     jf = joint_fit(
         image, good, stars, wing, sky_sigma,
         spacing=spacing, prior_sigma=prior, variance=var,
         detect_settings=detect_settings, verbose=verbose,
+        band=getattr(deep_coadd, 'band', None),
+        seg_good=seg_good,
+        free_margin=disk_mask_radius(stars['G'].astype('f8')),
     )
 
     image -= jf['sky']
@@ -353,6 +440,17 @@ def handle_stars_joint(
                                  verbose=verbose)
     star_table = make_star_table(stars, [])
     star_table['A'] = jf['A']
+
+    # the output mask of the brightest stars covers their ghost disk,
+    # which the fit modeled but whose edges it leaves rings at
+    starmask, ngrown = add_disk_masks(starmask, stars)
+    if ngrown > 0:
+        from scipy import ndimage
+        dstar = ndimage.distance_transform_edt(~starmask)
+        if verbose:
+            print(f'    {ngrown} stars brighter than G {DISK_MASK_GMAX:g}: '
+                  f'output mask grown to their ghost disk '
+                  f'({DISK_MASK_RADIUS:.0f} px)')
 
     if verbose:
         nfree = int(jf['free'].sum())
@@ -363,6 +461,7 @@ def handle_stars_joint(
     fit = dict(
         stars=stars,
         A=jf['A'],
+        A_err=jf['A_err'],
         free=jf['free'],
         nodes=jf['nodes'],
         node_values=jf['node_values'],
@@ -377,6 +476,7 @@ def handle_stars_joint(
         bg_restored=bg_restored,
         wing=wing,
         diffuse=jf['diffuse'],
+        big_sources=jf['big_sources'],
         nwing=nwing,
         wing_gmax=WING_GMAX,
         wing_rin=WING_RIN,

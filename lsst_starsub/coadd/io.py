@@ -113,40 +113,48 @@ def write_visit_file(
 
 def write_profiles_file(
     fname, dedges, dtable, meta, star_table=None,
-    rtable=None,
+    rtable=None, extra=None, maps=None,
 ):
     """
     Write the small per-detector output: the profiles alone.
 
     The d - r_mask profile table and edges (read by
     lsst-starsub-stack), the run meta, and optionally the census with
-    amplitudes and the radial profile table.
+    amplitudes, the radial profile table and the binned maps of the
+    image states.
 
     Parameters
     ----------
     fname: str
         The output file
-    dedges: array
+    dedges: array or None
         The d - r_mask annulus edges
-    dtable: structured array
-        The per-star d - r_mask profile table
+    dtable: structured array or None
+        The per-star d - r_mask profile table; None (--no-profiles)
+        writes neither
     meta: dict
         The run identity, written as a one-row table
     star_table: structured array, optional
         The census with amplitudes
     rtable: (edges, ptable), optional
         The radial profile edges and table
+    extra: dict, optional
+        extname -> structured array, further tables written after
+        the rest (e.g. the joint fit's sky nodes)
+    maps: dict, optional
+        extname -> (map, header dict), small images written last
+        (the box-median maps of the image states, visit.profiles.box_medians)
     """
     import rustfits
 
     print('writing:', fname)
 
-    dedges_t = np.zeros(1, dtype=[('edges', 'f8', dedges.size)])
-    dedges_t['edges'][0] = dedges
-
     with rustfits.FITS(fname, 'w+') as fits:
-        fits.write_table(dtable, extname='profiles_dmask')
-        fits.write_table(dedges_t, extname='dmask_edges')
+        if dtable is not None:
+            dedges_t = np.zeros(1, dtype=[('edges', 'f8', dedges.size)])
+            dedges_t['edges'][0] = dedges
+            fits.write_table(dtable, extname='profiles_dmask')
+            fits.write_table(dedges_t, extname='dmask_edges')
         fits.write_table(_meta_table(meta), extname='meta')
         if star_table is not None:
             fits.write_table(star_table, extname='gaia_stars')
@@ -156,6 +164,15 @@ def write_profiles_file(
             edges_t = np.zeros(1, dtype=[('edges', 'f8', edges.size)])
             edges_t['edges'][0] = edges
             fits.write_table(edges_t, extname='edges')
+        if extra is not None:
+            for name, table in extra.items():
+                fits.write_table(table, extname=name)
+        if maps is not None:
+            for name, (image, hdr) in maps.items():
+                fits.write_image(
+                    np.ascontiguousarray(image, dtype='f4'),
+                    extname=name, header=hdr,
+                )
 
 
 def _meta_table(meta):

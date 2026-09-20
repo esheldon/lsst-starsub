@@ -59,7 +59,13 @@ def get_args():
     add_butler_arguments(parser)
     parser.add_argument('--gsub', type=float, default=GSUB)
     parser.add_argument('--star-model', default='joint',
-                        choices=['joint', 'template', 'canonical'])
+                        choices=['joint', 'template', 'canonical', 'visit'],
+                        help='the star model; visit applies the correction '
+                             'coadd of the per-visit models (--correction) '
+                             'with no fit')
+    parser.add_argument('--correction', default=None,
+                        help='the lsst-starsub-correction-coadd file for '
+                             '--star-model visit')
     parser.add_argument('--joint-spacing', type=float, default=None,
                         help='joint model: sky mesh node spacing (px)')
     parser.add_argument('--joint-prior', type=float, default=None,
@@ -188,11 +194,26 @@ def main():
 
     prior = None if args.joint_prior is None else (
         None if args.joint_prior <= 0 else args.joint_prior)
-    out = run_clean(
-        vexp, gaia, tbox, STATE, args.gsub, args.nround, args.bright_grow,
-        args.star_model, canonical, truth=truth, inj=inj,
-        joint_spacing=args.joint_spacing, joint_prior=prior,
-    )
+    if args.star_model == 'visit':
+        # the visit route: the correction coadd applied, no fit
+        import rustfits
+        from ..coadd.clean import run_correction
+        if args.correction is None:
+            raise ValueError('--star-model visit needs --correction')
+        with rustfits.FITS(args.correction) as fits:
+            corr = fits['correction'].read()
+            chdr = fits['correction'].header
+        if (int(chdr['X0']), int(chdr['Y0'])) != (tbox.x.start, tbox.y.start) \
+                or corr.shape != image.shape:
+            raise ValueError('the correction file does not match the '
+                             'patch coadd frame')
+        out = run_correction(vexp, gaia, tbox, STATE, args.gsub, corr)
+    else:
+        out = run_clean(
+            vexp, gaia, tbox, STATE, args.gsub, args.nround,
+            args.bright_grow, args.star_model, canonical, truth=truth,
+            inj=inj, joint_spacing=args.joint_spacing, joint_prior=prior,
+        )
     res = out['res']
     meta = dict(
         tract=args.tract, patch=args.patch, band=args.band,

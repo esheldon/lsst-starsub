@@ -1114,8 +1114,757 @@ Option 2 (pre-subtract on visits and recoadd) is no longer needed as
 a fallback: step 1 showed the trough is removable on the existing
 coadds.
 
+9. **The visit scheme, first experiment** (2026-09-14, visit-plan.md
+   "The passes"; run dir `~/oh/starsub-visits/edge-2025060400354/`,
+   visit 2025060400354 in i, 178 detectors, fwhm 1.15").  Code:
+   `select_stars` takes an intruder rule (gmax, margin as a callable
+   of G); `joint_fit` takes `free_margin` (stars across the edge
+   within it are fit), `amps` (pinned values and prior centers), an
+   explicit `free`, and returns `A_err`; `handle_stars_visit` has the
+   joint model with `edge_factor`, `amplitudes` (pass 2: every star
+   pinned, sky-only fit) and `core_rap`; on a visit the restored image
+   is flattened with the wide-box sky pass first, since the joint
+   fit's segmentation runs on the image minus the star model without
+   its own sky (it masked 100 percent of a 1200 nJy sky otherwise);
+   `lsst-starsub-visit --star-model joint --canonical --edge-factor
+   --amplitudes --core-rap --profiles-only` writes the census with
+   A, A_err, free and the sky nodes beside the profiles;
+   `lsst-starsub-visit-gather` consolidates a visit (best constraint
+   by A_err) and writes `amplitudes-{visit}-{band}.fits` with the
+   cross-detector pairs; `lsst-starsub-visit-wing` builds the visit's
+   own wing (`visit.trough.visit_wing`: the pooled stack inside the
+   44 px junction, the canonical beyond); `scripts/visit_pass_jobs.py`
+   and `scripts/edge_stack.py` drive and stack.  Two variants ran:
+
+   a. Canonical wing, edge stars free (edge factor 3): 40,244 census
+      stars over the visit, 15,553 fit on at least one detector, 606
+      on two.  One visit constrains an amplitude to A_err 0.075 (G
+      6-10), 0.10-0.12 (G 11-13), 0.14-0.20 (G 13-17), against the
+      0.3 prior; the coadd fit on 7275/55 gives 0.033-0.066 for the
+      same G, the ratio 3-3.6 being the sky-sigma ratio 4.0 (26.6 vs
+      6.6 nJy) less the prior's floor: noise, not masking.  Bright
+      amplitudes run high, median 1.13-1.19 at G 10-12 (poor seeing).
+      The cross-detector pairs agree to +0.008 median but 0.31 rms,
+      the second detector prior-limited; the 130 pairs with the
+      better error < 0.15 have rms 0.53 and chi 2.4 (errors low by
+      2x, or the wing differs between detectors; unresolved).  The
+      residual stacks of the edge stars on the neighboring detector
+      (d - r_mask bins of 10 px, 10^-3 sky sigma, single visit):
+      G 6-13 pinned to the prediction +16 +15 +2 -6, consolidated
+      +7 +9 -3 -9 (73 stars, median noise 13); G 13-15 +5 -10 0 +4 vs
+      0 -12 -3 +3 (118 stars, noise 10); G 15-17 no change (158
+      stars); the on-image stars +13 +4 +4 +1 (G 6-13), -1 0 0 0 (G
+      13-15), -5 -4 -2 -2 (G 15-17).  So the consolidation halves the
+      inner residual of the bright edge stars, at the noise of one
+      visit.  Detector 1 (a corner) fails: pass-1 chi2/cell 280,
+      amplitudes +-50-150 (an unmasked feature, under study).
+   b. The visit's own wing with the core amplitudes: the unsaturated
+      on-image stars take their amplitude from the flux within 5 px
+      (`wing.core_amplitudes`, errors 10^-4-10^-3 from the sky
+      noise) and are pinned (free = 2 in the tables); only the
+      saturated and edge stars stay in the fit.  On detector 049: 203
+      of 215 measured, median 0.85 (G 15-16 0.78 with 0.05 scatter, G
+      17-19 0.87 with 0.20, the color term), the bright wing fits
+      0.98.  The pooled template's zero points differ, k_in (the wing
+      cloud) 1.28 x k_stamp (the stamps' cores) on this visit, the
+      same tension from the other side: which normalization A = 1
+      should mean is a calibration convention still to settle; for
+      the faint stars the far wing at stake is 10^-3 sigma.  The
+      full visit (`chain_c.sh`): 39,191 of 40,244 stars constrained,
+      32,048 with A_err < 0.05; the visit's core scale is 0.856 with
+      a per-star half 16-84 range of 0.19 (the color term).  The
+      edge-star stacks are the same as in (a) to 1-2 x 10^-3 sigma
+      (the edge stars are wing-fit in both); the on-image G 15-17
+      stack moves from -5 -4 -2 -2 to -1 -3 -1 -2.  Per detector
+      against the focal-plane radius (0-100, 100-175, 175-250,
+      250-300, 300-400 mm; the field edge is ~320 mm): the core
+      amplitude 0.868, 0.868, 0.853, 0.844, 0.844 (G < 17: 0.825 to
+      0.803), the bright stars' wing-fit amplitude (G < 13.5, err <
+      0.12) 1.089, 1.087, 1.110, 1.097, 1.206, the fwhm 1.13 to 1.22
+      arcsec.  So the wing per unit core light grows ~14 percent from
+      the center to the field edge, the vignetting on the wings the
+      user anticipated; the detector-to-detector rms of the core
+      scale within a ring is 0.023 against 0.014 expected from the
+      per-star scatter, real per-detector structure at 2 percent.
+      Detector 1's dead amplifier C00 (unflagged by DM; reported) is
+      now caught by the loader's variance guard
+      (`visit.exposure.flag_dead_pixels`); its pass-1c run predates
+      the guard (chi2/cell 16.6) and the stacks are medians.
+   c. To keep it simple the heavily vignetted detectors are left out
+      for now: `lsst-starsub-visit-detectors` lists a visit's
+      detectors within `visit.exposure.MAX_FIELD_RADIUS` (300 mm; 23
+      of the 178 are beyond), and the gather and `edge_stack.py`
+      take the list.  On the 155 inner detectors (`gather-inner/`,
+      `edge-stack-c-inner.png`): scale 0.858, the edge-star stacks as
+      before (G 6-13 prediction +19 +16 +3 -4, consolidated +14 +9 -1
+      -8), and the bright cross-detector pairs still disagree, chi
+      rms 2.43 on 115 pairs, so that is not the vignetting: the
+      wing-fit errors of the bright stars are low by ~2x, most likely
+      the wing shape at this visit's seeing (0.90 of the canonical at
+      60-100 px) making the per-star residuals systematic rather than
+      noise.  To look at with a second visit.
+   d. The second visit, 2025062000519 (fwhm 0.77", k_in/k_stamp 1.05;
+      `scripts/visit_edge_chain.sh VISIT BAND` runs the whole scheme,
+      run dir `edge-2025062000519/`), on the 155 inner detectors:
+      36,324 of 37,321 stars constrained, core scale 1.095 (scatter
+      0.26), chi2/cell median 1.06 max 1.41 (no bad detector).  The
+      bright cross-detector pairs now agree, chi rms 1.26 on 101
+      pairs (G < 12) against 2.43 at 1.15", and 0.75 at G 12-14: the
+      disagreement at poor seeing is the wing shape, as suspected;
+      the errors are right when the shape is.  The wing-fit scale
+      of the bright stars climbs from 0.98 at the center to 1.15 at
+      250-300 mm even inside the cut, more than on the poor-seeing
+      visit (1.09-1.10), so the field-radius term is not small at
+      good seeing.  The per-detector core scale still tracks the
+      local fwhm (correlation -0.50, -0.35 per arcsec over
+      0.70-0.89"): the seeing varies across a visit and a 5 px
+      aperture's enclosed fraction with it, so the core amplitude
+      now uses the detector's own core stack
+      (`visit.exposure.detector_core_stack`: the mean of the
+      unsaturated stars' integer-cut stamps per unit Gaia flux,
+      scaled to the median aperture sum; a per-pixel median narrows
+      the profile and ran 10 percent low), with stars that have a
+      Gaia neighbor within 12 px left to the fit.  Pass 2 on this
+      visit (`edge-stack-c-inner.png`): the bright edge stars' inner
+      residual +24 +13 +9 -3 at the prediction, +11 +12 +8 -1
+      consolidated, the same halving of the innermost bin as on visit
+      354 (+16 to +7); G 13-15 and 15-17 unchanged at a few 10^-3
+      sigma.  The reruns of pass 1 with the per-detector core stack
+      (`scripts/visit_pass1_rerun.sh VISIT BAND p1d`, then
+      `scripts/core_scale_by_detector.py` for the core scale against
+      the fwhm; on pass 1c the slope is -0.33 and -0.35 per arcsec
+      with correlation -0.88 and -0.50 on the two visits): the core
+      scale per detector comes out 0.997 and 1.007 (1 by construction,
+      the stack is normalized per detector), the slope against the
+      fwhm -0.02 and -0.10 per arcsec, the rms over detectors 0.008
+      and 0.010 against 0.015 and 0.020 about the old line; the bright
+      wing-fit scale (free = 1, A_err < 0.2) is unchanged, 0.97 inside
+      200 mm and 1.00 outside on both visits, and so is the bright
+      cross-detector chi rms.  The per-star scatter of the core
+      amplitudes is the color term either way (0.22-0.23).  Pass 2 at
+      the new amplitudes (`scripts/visit_pass2_rerun.sh VISIT BAND
+      p1d`, stacks `edge-stack-p2d-inner.png`) showed the flaw: the
+      on-image G 15-17 stack went from -1 -3 -1 -2 to -8 -6 -2 -2 on
+      visit 354 (and -3 -4 -3 to -1 -3 -3 on 519).  A stack normalized
+      to the detector's median star makes that star's amplitude 1, but
+      the amplitude renders the visit wing, whose inner zero point is
+      not the median star's: the stars' flux over the wing's is 0.85
+      on 354 and 1.07 on 519 at every radius from 5 to 16 px (the old
+      core scales, 0.859 and 1.096), so the pass-1d model was 15
+      percent too bright on 354.  The same probe (8 detectors per
+      visit across the fwhm range) shows where the seeing acts: the
+      ratio within 5 px falls 0.88 to 0.81 over 1.02-1.30 arcsec,
+      within 12 px it is flat to 2 percent and the residual scatter is
+      per-detector structure seen at all radii.  So the stack now
+      takes its zero point from the wing within 12 px
+      (`CORE_NORM_RAD`) and supplies only the core shape; the
+      amplitudes stay relative to the wing they render, as the bright
+      stars' are.  Pass 1e/2e with it: the on-image G 15-17 stack on
+      354 is back to -2 -3 -1 -2 (519: -4 -4 -3 -2), the core scale
+      0.872 and 1.124 with the slope against the fwhm gone (-0.07 and
+      -0.10 per arcsec, correlation -0.17 and -0.09).  But the stack
+      brought its own per-detector noise: the core scale scatters
+      0.031 and 0.035 across detectors against 0.016 and 0.020 about
+      the pass-1c seeing line, and the pass-1e/1c ratio per detector
+      scatters 0.03 after its seeing trend; not by raft or vendor
+      (e2v and ITL differ by 1 percent), not the star count.  On 24
+      detectors per visit the stack's 5/12 px flux ratio, after its
+      seeing trend, scatters 2.0 and 3.8 percent for the plain mean,
+      0.76 and 1.26 with Gaia neighbors within 24 px excluded, 0.52
+      and 1.17 with a 3 sigma per-pixel clipped mean, 0.50 and 1.04
+      with both; per-stamp normalization changes nothing.  So the
+      stack is now the clipped mean over the isolated stars
+      (`clipped_mean`, `CORE_STACK_CLIP`, `CORE_STACK_ISOLATION`).
+      Pass 1f/2f with it: the core scale 0.848 and 1.084, rms over
+      detectors 0.015 and 0.018 (pass 1c: 0.016 and 0.020 about its
+      seeing line, and the line is gone: slope -0.08 and -0.14 per
+      arcsec, no better than the scatter), the stack's own noise 0.7
+      and 1.0 percent (the pass-1f/1c ratio after its seeing trend);
+      the on-image G 15-17 stack -0 -3 -1 -1 on 354 (the best of the
+      runs) and -3 -4 -3 -2 on 519 (as pass 1c); the bright stars
+      unchanged throughout.  What remains per detector (1.5-1.8
+      percent, not radial, not by raft or vendor) is the detector's
+      own flux scale against Gaia, or its wing fraction; the per-chip
+      term the plan anticipated, to revisit with the field-radius
+      term.  This is the version to keep: the core amplitudes at 5 px
+      against the detector's own clipped core stack with the wing's
+      zero point at 12 px.
+   e. The total package, sky and stars, checked against the pipeline
+      (2026-09-15; the tier-2 checks of the evaluation plan).
+      - Cross-visit amplitudes: 13,816 stars are on both visits.  For
+        the core-measured stars the ratio of the amplitudes (each
+        over its visit scale) scatters 0.9 percent per star (G
+        16.5-19.5) and 0.33 percent over detectors: the color term
+        cancels, and the 1.5-1.8 percent per-detector core-scale
+        scatter within a visit is the median's noise over ~150 stars
+        with a 0.2 color spread, not detector structure.  The bright
+        wing-fit stars differ by 0.31 rms, chi rms 1.4 (2.1 at G <
+        12, the poor-seeing wing shape again).  It also caught a
+        defect: at 0.77 arcsec 31 percent of the G 15.5-16.5 stars on
+        visit 519 had amplitudes 0.25-0.55, saturated (SAT|INTRP at
+        the core) but unflagged because the census tested saturation
+        only below GSAT + 0.5 = 15.7, and the core aperture summed
+        the interpolated pixels.  Now the flag comes from the mask at
+        any G (2 px for the fainter stars, 5 px for the bright, so a
+        neighbor's trail does not flag them) and the core
+        measurement and stack skip SAT and INTRP pixels
+        (`core_pixels`).  With it (pass 1g/2g) the outliers go from
+        318 to 22 of ~9000, none in G 15.5-16.5 (scatter 0.8
+        percent).  Note the census change also reaches the coadd
+        route through lsst-mdet: stars fainter than 15.7 with SAT in
+        the coadd mask are now saturated there too.
+      - The trough against the pipeline
+        (`scripts/visit_trough_compare.py`, profiles states
+        `delivered_starsub` and `warp_starsub`: the pipeline's
+        delivered and warp-state skies with our star model removed;
+        `trough-compare-p2h.png`, both visits, 155 detectors).  Around
+        G 6-9 stars the delivered sky dips -83 -131 -93 -38 x 10^-3
+        sigma at 221-808 px (3.5 nJy) on both visits; the warp state
+        (skyCorr applied; the DP2 deep coadd is built without it, so
+        the delivered state is what the coadd carries and this is
+        what a coadd of the pretty warps would) -22 -12 +10 -10 and
+        -12 -11 +21 +6; ours +17 +15 +5 -0 and +42 +17 +6 +1.  G
+        9-11: delivered -35 -27 -16 -6, ours +1 -1 -1 -2 beyond the
+        first bin.  G 11-15: everything within a few 10^-3 sigma.
+        The positive first bins of ours for the brightest stars (+17
+        at 1.15", +42 at 0.77", 30-37 stars) are the wing shape at
+        1.5-2 mask radii, the field-radius and seeing terms still to
+        add.
+      - Sky flatness and edge continuity on raft R23 of visit 354
+        (`scripts/raft_sky_checks.py` on the full-image pass-2 outputs
+        `images-p2g/`, detectors 99-107 with G 5.7 and 6.4 stars;
+        `raft-r23-sky-checks.png`).  Box medians (64 px) less each
+        state's far-field pedestal, by distance to the nearest G < 10
+        star (150-300, 300-600, 600-1200, 1200-2400 px): the delivered
+        sky -63 -64 -26 0, the warp sky -87 -27 -60 -35 (skyCorr's
+        smooth model leaves large-scale structure), ours +8 +2 0 -1.
+        The pedestals (what each estimator does with the unmasked
+        faint sources): delivered 0, warp +1.3 nJy, ours +0.46 nJy; a
+        coadd's own zero point absorbs them.  Across the 12 detector
+        gaps the data themselves jump by 3.9 nJy rms (0.3 percent of
+        the sky: real detector offsets, the per-chip terms of the
+        plan); the delivered per-detector polynomial follows them
+        (4.3 rms) and leaves 2.9 nJy rms of residual mismatch across
+        the gaps, skyCorr's model is smooth (1.75) and leaves 3.5,
+        ours follows them (3.4) and leaves 1.1.  So the sky product
+        is flat around the bright stars where the pipeline's dips by
+        2-3 nJy, and the per-detector mesh absorbs the real detector
+        offsets, which a focal-plane-continuous sky would have to
+        carry as per-chip terms.
+      Figures (`edge-2025060400354/`): `raft-r23-mosaic.png`
+      (`scripts/raft_mosaic.py`: the raft's sky in 32 px boxes, three
+      columns for the pipeline's delivered image, the same with
+      skyCorr applied and ours, two rows with the stars in and with
+      our star model removed: the pipeline's troughs around the G
+      5.7 and 6.4 stars and skyCorr's +-4 nJy structure against our
+      flat field), `raft-r23-cut.png` (`scripts/raft_star_cut.py`: the
+      cut through the G 5.7 star in a 544 px band), `before-after-103.png`
+      (`scripts/detector_before_after.py`: one detector, the delivered
+      image, the pipeline sky with our star removed, our residual),
+      and `trough-compare-p2h.png` on both visits (the profiles).
+   f. The edge-node question and a sky bug it caught (2026-09-15).
+      The profiles files now carry 32 px box-median maps of the image
+      states and the three total sky models
+      (`visit.profiles.box_medians`/`state_maps`, extensions
+      `box_*`), so the focal-plane figures come from the small files:
+      `scripts/focal_plane_mosaic.py` (the 3 x 2 mosaic on the camera
+      geometry, `focal-plane-mosaic-*.png`, `--cut` for the cut
+      through the brightest star) and `scripts/edge_check.py`, which
+      compares the residual across every gap between adjacent
+      detectors (strips of 4 boxes each side, 8-box bins along the
+      edge) with the same statistic across lines through detector
+      interiors: if the gap mismatch is no larger, the one-sided edge
+      nodes lose nothing.  On visit 354 (pass 2i): the data jump
+      across the gaps 5.1 nJy rms (real detector offsets); residual
+      mismatch across the gaps 1.27 nJy for ours against 1.04 in the
+      interiors, the pipeline's skies 2.17 against 1.12, so the
+      one-sided edges cost ~0.7 nJy rms per visit and the pipeline
+      twice that.  On visit 519 ours came out 2.86 against 1.76,
+      worse than the pipeline, and the per-pair table put it all on
+      three pairs around detectors 85, 82 and 77: in the corner of
+      detector 85 next to a G 9.6 star, our total sky sat 64 nJy low
+      over 128 x 800 px and the residual +66 nJy.  The wide-box sky
+      pass (sep, bw 256) extrapolated its spline into a corner 88
+      percent covered by the star's wide exclusion; the flattened
+      image there was a +64 nJy plateau, which the joint fit's
+      segmentation masked as a source, so the mesh had almost no
+      cells there (node errors 2-3 nJy against 0.2) and could not
+      correct it.  The same scan found the hole on detector 159 of
+      visit 354 harmlessly absorbed (the mesh had cells) and smaller
+      ones on 131 and 178 of 519.  Fix: `visit.exposure.box_background`
+      replaces sep in `sky_background`: box medians (min 10 percent
+      usable), empty boxes filled from the nearest box that has
+      pixels, a 3 x 3 median filter, bilinear interpolation clamped
+      at the edges; it cannot overshoot.  In-process on detector 85
+      the corner residual is now +1.0 nJy against +0.9 for the
+      detector and the segmentation excludes 5.6 instead of 12
+      percent.  The change reaches pass 1 too (the core stack and the
+      fit see the flattened image), so pass 1j/2j reran on both
+      visits (2026-09-16; the first attempt gathered a partial pass 1
+      after the preemption sweeps ran out, so the rerun scripts now
+      source `scripts/slurm_wait.sh`, which resubmits by missing
+      outputs until complete, and pass 2 refuses a partial pass 1).
+      Pass 1 is unchanged by the fix to the numbers quoted above
+      (core scale 0.848 and 1.092, the same rms and slopes, the same
+      edge-star stacks).  The edge check with the fix, now with a
+      robust rms (1.4826 x the median absolute value; the plain rms
+      is dominated by a few lines through bright extended sources
+      that the box maps did not mask, which `seg == 0` in the maps
+      now handles, pass 2k):
+        visit 354 (pass 2k): residual mismatch across the gaps,
+        robust rms in nJy, ours 0.61 against 0.64 across interior
+        lines; the pipeline's polynomial sky 1.38 against 0.73,
+        skyCorr 1.55 against 0.77.  Visit 519: ours 0.57 against
+        0.61; polynomial 1.18 against 0.71, skyCorr 1.41 against
+        0.72.  With the sources masked in the maps the plain rms
+        agrees within 30 percent (ours 0.79 against 0.72 and 0.86
+        against 0.83; the worst interior lines are now 2-4 nJy, the
+        halos of bright galaxies the segmentation leaves).  The data
+        jump across the gaps 5.7 and 6.4 nJy rms.
+      So with the sky pass fixed the one-sided edge nodes cost
+      nothing measurable (the gaps match the interiors on both
+      visits), while the pipeline's per-detector polynomial leaves
+      twice the interior mismatch at the gaps.  No focal-plane solve
+      is needed for the edges.  The trough profiles and the flatness
+      table are as before (G 6-9: delivered -99 -130 -96 -38, ours
+      +16 +15 +6 -1 on 354; +38 +20 +7 +1 on 519).  Figures from the
+      maps: `focal-plane-mosaic-p2k.{pdf,png}` (`--marks none` for the
+      pdf), `focal-plane-cut-p2k.pdf`, `raft-R23-mosaic-p2k.pdf`,
+      `edge-check-p2k.png`, `trough-compare-p2k.png`.
+10. The coadd test on patch 55 from the per-visit models (tier 3;
+    planned 2026-09-16).  The clean coadd is the delivered coadd plus
+    the coadd of the per-detector corrections (the pipeline's
+    background put back, minus our sky, minus our star model), each
+    correction evaluated at the coadd's pixels through the WCS and
+    weighted as the CellCoadd weighted that input: linear, exact,
+    noise-free, no resampling of a model image.  Steps: (1) the
+    product and its renderer; (2) the scheme on the 65 i-band visits
+    of tract 7275 (templates and Gaia extracts exist); (3) the
+    correction coadd per cell; (4) the coadd-level checks (stacks,
+    cell sky statistics) against the delivered and the joint-fit
+    coadds; (5) an lsst-mdet method that reads the correction plane,
+    and the shear response on the patch 55 cells.
+    a. Done: the product.  The profiles file now carries the
+       wide-pass box grid (`sky_boxes`, header BW; `box_background`
+       returns it, `sky_background` keeps it on the exposure, the
+       joint route returns it), so with the mesh nodes and the census
+       amplitudes it reproduces the fit.  `lsst_starsub.visit.product`:
+       `read_product`, `sky_at` (the boxes plus the mesh at any
+       position, `boxes_at` and `mesh_at` being the evaluations
+       `box_background` and `render_mesh` make), `render_sky`,
+       `render_stars`, `wing_file`.  Verified on detector 103 of visit
+       354 against the in-process fit: the sky to 1.2e-4 nJy (the
+       nodes are stored as float32), the star model to 0.  Files
+       written before this (pass 2k and earlier) lack `sky_boxes`; a
+       pass-2 rerun adds it.  Still to add: a star-model evaluation
+       at arbitrary positions for the coadd frame (the wing at the
+       transformed star positions).
+    b. Done (2026-09-16, launched and completed the same day): the
+       scheme on the 64 i-band visits of tract 7275 with a pooled
+       template (2025071800489 has none), `scripts/run_tract_visits.sh
+       tract-07275-visits-i.txt i 6` -> `scripts/visit_scheme.sh VISIT
+       BAND` per visit, six visits side by side, in
+       `~/oh/starsub-visits/tract-07275/VISIT/` (detectors-inner.txt,
+       the visit wing, pass1/, pass2/, scheme.log); all 64 complete,
+       13 GB.  The checkout (disks, --diagnostics, the product) is
+       installed since.  Per job the profile measurement was three
+       quarters of the time (105 of 138 s on detector 103), so the
+       production passes use the new `--no-profiles` (the files keep
+       the census, nodes, boxes and maps; no profile tables): 38 s a
+       job, about 220 core-hours for the run.  The CLI prints stage
+       timings.  The waits are per visit (the queue prefix carries
+       the visit, `slurm_wait.sh`).  Disk: 670 kB a detector with
+       the maps, 14 GB for the run; the product alone is 40 kB.  So
+       (in the checkout, NOT installed until this run completes,
+       since its jobs call the installed CLI with `--no-profiles`)
+       the small file is now the product by default and
+       `--diagnostics maps,profiles|all` adds the rest; `--no-profiles`
+       stays as a hidden no-op for the running chain.  The diagnostic
+       chains (`visit_edge_chain.sh`, the rerun scripts) pass
+       `--diagnostics all`; `visit_scheme.sh` still passes
+       `--no-profiles` and should drop it after the install.  The
+       focal-plane figures need `maps`.
+    d. Steps 3 and 4 built (2026-09-16).  `lsst_starsub.coadd.correction`
+       and `lsst-starsub-correction-coadd`: for every cell of the
+       CellCoadd, each input's correction (the initial background
+       rendered from the stored layers, minus the product's sky, minus
+       its star model with the disks) evaluated at the cell's pixels
+       through the two WCSs, weighted as the CellCoadd weighted the
+       input, summed over the cell's full weight; inputs without a
+       product contribute zero and the corrected weight fraction is
+       recorded.  Output `correction-{tract}-{patch}-{band}.fits`
+       (correction, wfrac, ninput, the stitched coadd with its object
+       background restored, and clean = coadd + correction).  Patch
+       55: 484 cells of 150 px, 16-26 inputs each, 83 inputs from 27
+       visits, 20 min single-threaded.  `lsst-starsub-cell-clean
+       --star-model visit --correction FILE` measures the same
+       profiles the coadd-level routes get (coadd.clean.run_correction)
+       and `scripts/compare_routes.py` stacks the routes side by side.
+       First result (v1, 73 of 83 inputs, 86 percent of the weight):
+       the correction is -6 nJy in the median with +-1.4 nJy over
+       cells and 1.2 nJy rms steps between neighboring cells; the
+       per-star stacks on the coadd (10^-3 coadd sigma, d - r_mask 5
+       to 305 px) for G 15-17: +101 +38 +27 +42 +10 +8 -3 -4 +1, for
+       G 13-15: -104 -38 +9 +29 -22 -85 -53 -39 -52 (14 stars), the
+       far bins carrying the cell steps.  The pedestal: the coadder
+       rendered the background with the visit summary's final
+       calibration, 0.15-0.3 percent below the preliminary photoCalib
+       the loader used, 2-4 nJy per detector; fixed to the loader's.
+       v2 with the fix and 81 of 83 inputs (94 percent of the
+       weight): the correction is +0.3 nJy in the median with 0.5 nJy
+       rms over cells.  Against the coadd-level joint fit run on the
+       same patch (`clean-none-joint-07275-55-i.fits`,
+       `compare-routes-55.png`), the per-star residual stacks (10^-3
+       coadd sigma, d - r_mask 5 to 305 px) are the same within their
+       noise: G 15-17 (35 stars) joint +23 -2 +10 +15 -17 +4 +12 +6
+       -11, visit +9 +14 +22 +14 -8 +1 +16 +10 -15; G 13-15 (14 stars)
+       joint -28 +17 +26 +15 +18 -3 +10 -4 -0, visit -50 -7 +20 +12
+       +27 -1 +20 -0 +7; G 6-13 has 2 stars.  The delivered coadd's
+       wings are +0.1 to +0.6 sigma in the same bins.  At the cell
+       scale (150 px medians with the stars masked) the delivered
+       coadd has 0.73 nJy rms over cells and 0.85 nJy steps between
+       neighbors, the visit route's clean coadd 0.46 and 0.66, the
+       coadd-level residual 0.50 and 0.69: the visit route's sky is as
+       flat as the coadd-level route's and flatter than the
+       pipeline's.  So on this patch the two routes are equivalent at
+       the level the stacks can see; the shear test (step 5) is the
+       discriminating number.
+    e. Step 5 plumbing (2026-09-16): `lsst_starsub.coadd.starsub.
+       handle_stars_correction` (the joint route's contract without a
+       fit: census, masks, apply_background(None), the correction
+       plane added; fit None), and in lsst-mdet `--starsub-method
+       visit --correction-pattern` in cells.load_coadds_butler,
+       lsst-mdet-getimages and lsst-mdet-process-cells (with a new
+       `--bands`, default r,i,z; the redo-bg subtracts only for the
+       template route).  Single-band runs hit a latent bug in
+       lsst_mdet.coadd.coadd_mbobs (it returned the bare Observation
+       for one band where the caller unpacks two); fixed to return
+       (obs, [median weight]) with good_fracs in the meta.  Only the
+       i band has products, so the shear test runs in i alone for
+       both routes: `scripts/compare_mdet.py` matches the two
+       catalogs per metacal step and prints the shape and flux
+       differences against their errors and each route's response
+       and mean shear.  Test runs on cells (10,10), (11,11) in
+       `~/oh/starsub-visits/mdet-test/{joint,visit}-i-7275-55.fits`:
+       124 and 123 rows, 121 matched, and for the 19 matched objects
+       with flags 0 and s2n > 10 the shapes differ by 0.14-0.18 of
+       their errors and T by 0.25; the i flux is 1.4 percent lower
+       on the visit route (55 nJy in the median, 0.4 of the error):
+       the visit route's coadd keeps its +0.3 nJy pedestal (the
+       redo-bg does not subtract for it, as for the joint route),
+       and mdet's fluxes see it.  Two more single-band fixes in
+       lsst-mdet on the way: the cell_meta good_frac vector of
+       length 1 (io._squeeze_unit_fields; the compressed table writer
+       takes vectors of 2 and more) and the color image (3 bands
+       only).  The steps are named ns, 1p, 1m (no 2p/2m), so only
+       R11 is measured.  The full-patch runs of both routes in i
+       (484 cells, one process each, ~1 hour) are in
+       `mdet-test/full/`.
+    f. The shear test on patch 55 (2026-09-16).  Object by object the
+       routes agree: 28,613 of ~29,000 rows matched within 1 px; for
+       the 7718 matched objects with flags 0, g_flags 0 and s2n > 10
+       the shape differences (visit minus joint) are +0.0002 in g1
+       and +0.0004 in g2 in the median, with an rms of 0.057 and a
+       median |difference| of 0.08 of the shape errors, i.e. the same
+       shapes to 8 percent of the noise and no offset at the 0.001
+       level (the error on the median difference is 0.0007).  The
+       sizes T are 0.03 smaller and the i fluxes 2.5 percent lower
+       (101 nJy in the median) on the visit route: the pedestal.  A
+       visit-depth sky (the box medians and mesh with the visit's
+       segmentation) holds the sources below the visit's detection
+       threshold that a coadd-depth sky masks, so the visit route's
+       clean coadd sits ~0.3-0.5 nJy above the coadd-level mesh's zero
+       point, and mdet's fluxes and sizes see it; the shapes do not.
+       The remedy is a coadd-level pedestal (or coarse) term for the
+       visit route after coaddition, measured with the coadd's own
+       segmentation: to add before the routes are compared on fluxes.
+       The per-route response and mean shear from one patch are
+       noise: with ~2000 selected objects the 1p-1m difference has an
+       error of ~0.01 and R11 = (g1p - g1m) / 0.02 an error of ~0.5
+       (the joint run gave 0.15, the visit run 0.83).  A shear bias
+       test at the 10^-3 level needs the injection machinery
+       (lsst-mdet-inject-node, INJECT_SETTINGS) over many patches; on
+       real objects the discriminating statistic is the matched
+       difference above, which is null.  mdet's own star-residual QA
+       on the two runs: max |stack| 0.0087 sigma (joint) and 0.0084
+       (visit) over 143 stars G 15-19.
+       So the coadd test's verdict: the visit route reproduces the
+       coadd-level route's sky, star residuals and shapes on this
+       patch; it does not beat it here, and the patch's brightest
+       star is G 12.3, so the regime where the routes should differ
+       (G < 9 stars, the ghost disks, the trough of the very bright
+       wings) is not exercised.  A patch with a G 6-8 star is the
+       next test target once the far wing and disk are in; the
+       machinery now runs end to end in an hour per patch and band.
+    c. A finding from the renderer (2026-09-16): the brightest stars'
+       amplitudes are not trustworthy.  On visit 354 the G 5.74 star
+       on detector 103 has A = -0.10 +- 0.03 from its own detector in
+       every pass-1 run since the first (canonical wing, -0.135), and
+       +2.6 +- 0.16 from detector 106, where it is 750 px off the
+       edge; the gather takes the smaller error.  G 6.41: 0.04; G
+       4.28: 2.46; on visit 519 the G 5.74 and 6.32 stars 0.17 and
+       0.19.  With A <= 0 the renderer draws nothing (as the fit's
+       own does) and the mesh carries the wing: the pass-2k "flat"
+       state around the G 5.7 star is 0.11 sigma at 423 px where the
+       model at A = 1 is 1.06, i.e. the sky model holds the star.
+       For the clean coadd the split does not matter (sky and stars
+       are both subtracted), but the product's split is wrong, the
+       inner-wing residual of these stars is left to a 256 px mesh
+       (the +16 to +38 x 10^-3 sigma first bins of the G 6-9 stacks),
+       and two detectors disagreeing by 2.8 at "3 percent" errors
+       means the errors are wrong for them: beyond a 450 px mask the
+       far wing is nearly degenerate with the mesh, and something
+       (a ghost, an asymmetric halo, the aureole shape) pulls the
+       two sides apart.  To do with the wing terms (improvement 2):
+       look at the data around a G 5-6 star against the model with
+       the mesh held (a fit with the star pinned and the residual
+       measured before any refit), and until then pin the stars
+       brighter than ~G 8 to the prediction or give them a tight
+       prior, since the fit adds nothing reliable for them.
+       The cause, found the same day from the raw sky (the delivered
+       map plus the pipeline's sky map, 32 px boxes, sources masked,
+       minus the 2000-3000 px level) around the brightest stars of
+       both visits:
+       - A ghost disk, the user's "circular feature": flat light
+         from the mask edge out to a sharp edge at 800-850 px (2.7
+         arcmin), centered on the star to ~50 px on most stars (one
+         G 6.55 star reaches 1250 px in one quadrant), a pupil image
+         from a reflection.  Level 18 nJy on the G 5.74 star, 3-5 nJy
+         on the G 6.4-7.0 stars, 5-6 nJy on two G 7.55 stars: not a
+         function of G alone (the i-band flux, i.e. the color, and
+         perhaps the field position).  Beyond the edge the wing is at
+         or below 1 nJy.
+       - The wing model itself is 2-3x too bright inside ~500 px for
+         the G 6.4-7.0 stars on both visits (model 12-16 nJy at 425-
+         475 px against 3-5 measured), but not for the G 7.55 stars
+         (data above the model everywhere): the bright-end magnitude
+         term of the canonical wing is off.
+       So the fitted amplitudes of 0.04-0.5 are measurements of a
+       wrong model, and the +2.6 from the neighboring detector is its
+       bottom rows sitting on the disk's edge (15 nJy where the wing
+       says 8).  Both effects are at the nJy level of the trough
+       itself, for the ~10 stars brighter than G 7.5 on a visit, and
+       the mesh cannot absorb a sharp edge, so they leave rings.  To
+       do (the wing work, now first): a disk component per bright
+       star in the joint fit (a uniform disk of the measured radius,
+       free amplitude, its center a fit or a field-position rule;
+       the sharp edge makes it separable from the mesh) and the
+       bright-end wing term from the pooled 64-visit pass-1 data.
+       Figure: scratchpad `bright-star-raw-354.png`.
+       [The disk component is in the joint fit since 2026-09-16:
+       `joint.DISK_*`, `disk_column`, `render_disks`; a free disk
+       amplitude D per star brighter than DISK_GMAX (8) whose disk
+       reaches the detector, prior 0.5 about the prediction, carried
+       through the star table, the gather, pass 2 and the product
+       renderers (`disk_model_at`); test `test_ghost_disk_recovered`.
+       On the real G 5.7 star the neighboring detector measures D =
+       1.06 +- 0.03 and A = 0.85 +- 0.17, reproducing the 18.5 nJy
+       plateau, but the star's own detector still lands at A = -0.28
+       with D = 0.87: beyond the disk the data are 2.3, 1.1, 0.5, 0.3
+       nJy at 875-1025 px where the wing model at A = 1 says 5.3,
+       4.7, 4.1, 3.7, ten times too bright, because the pooled cloud
+       the aureole was fit to had the disk plateau in it.  The far
+       wing has to be re-derived with the disk accounted for (the
+       pooled cloud with the disk region and the brightest stars out,
+       or a disk term in the pooled fit).  The tract run predates the
+       disk; the coadd test proceeds with the fit as it stands.]
+       The stacked template (`scripts/bright_star_stamps.py` per
+       visit: the raw sky with the initial background put back,
+       other stars' circles and the segmentation masked, 2800 px
+       stamps binned 4 x 4; `scripts/bright_star_stack.py`: a plane
+       through 1100-1380 px removed, each star normalized by its
+       500-700 px level, median stack; `~/oh/starsub-visits/
+       bright-stamps/`, 45 stars G < 7.5 from the first six visits of
+       the tract run, `stack-g75.png`): a disk of radius 827 px with
+       the half-level edge at 829, 824, 825, 831 px in the four
+       quadrants, so centered on the star to a few px and circular;
+       the same radius for G < 6.5 (832) and G 6.5-7.5 (820).  Inside,
+       the profile falls from 8.9 plateau units at 212 px to 1.0 at
+       490 px (the wing), then 1.05 -> 0.66 from 500 to 812 px (the
+       flat disk plus the wing's tail), a bump to 1.27 at 538 px (a
+       second, fainter ring?), the edge 0.66 -> 0.15 between 812 and
+       862 px, a tail to zero by 1000 px.  The level: 18-20 nJy on
+       the G 5.74 star in four visits (consistent), 24 and 37 on the
+       G 4.28 star in two, 4-7 on the G 6.3-6.4 stars, 1.6-7.2 on G
+       6.8-7.0, 2-5 on G 7.3-7.5; per unit Gaia flux a median of
+       2.2e3 nJy with a half 16-84 spread of 48 percent (the i-band
+       flux against G, i.e. the color).  So the component to add is a
+       uniform disk of radius 827 px per star with a free amplitude,
+       rendered with the wing; the stack itself, with the wing model
+       subtracted, is the empirical shape if a uniform disk proves
+       too crude (the 538 px bump).
+    g. The far wing re-derived from the pooled cloud, and two things
+       it exposed (2026-09-17).  The per-visit template files keep
+       every star's flux-normalized wing profile (12-2500 px, 30 log
+       annuli), so the cloud pools over the band's visits without
+       the deleted extracts: 369,813 stars in i (65 visits), 125,254
+       in r (21), 136,937 in z (24); `scripts/pooled_wings.py` (the
+       per-G-bin medians and the step across the ring edge) and
+       `scripts/canonical_empirical.py` (the combined profile, the
+       fit and the new wing file).  A free disk term in the
+       per-visit fit was tried first (`--from-template` refits a
+       template file in 6 s) and fails: the plateau is degenerate
+       with the zero point k_in over 12-800 px and one visit's
+       G 6-10 stars beyond the ring are zero within 500 nJy per
+       unit flux, so the disk came out -1.7e3.  The pooled cloud
+       instead shows:
+       - The ghost is a ring, not a disk: the pupil's image with the
+         central obscuration.  Combining the G bins per annulus
+         (each bin's far level removed as its sky bias, its first,
+         partly masked annulus dropped) the i profile from 70 to
+         1700 px is one power law r^-2.85 plus a ring from 510 to
+         827 px at 1.35e3 nJy per unit flux: chi2 37 for 18 points,
+         against 111 for a filled disk (the fit prefers 500-520 for
+         the inner radius, 0.62 of the outer, the obscuration; the
+         bright-star stack's bump at 538 px is this inner edge).
+         The step across the outer edge is the same in every G bin,
+         2339 +- 78 (G 6-8) to 2953 +- 669 (G 11-12), so the ring
+         scales with the flux.  Per band the level is 1.36e3 (i),
+         1.19e3 (r) and 3.3e2 (z): `joint.DISK_LEVELS`,
+         `disk_level(band)`, `disk_profile` now the annulus, the
+         band threaded through `disk_prediction`, `render_disks`,
+         `joint_fit(band=)` (required when a G < 8 star reaches the
+         image), the product renderers and the coadd route.  r
+         also carries a flux-proportional excess beyond the ring
+         (450-700 per unit flux at 900-1400 px in all four bright
+         bins, fading by 1600), a second, fainter ghost or halo;
+         the empirical wing holds it.
+       - The old canonical wing (the median of the per-visit
+         two-power-law fits, which had absorbed the ring into the
+         aureole) is 12-16 percent low at 100-160 px, right at
+         190-270, 5-17 percent high at 320-460, and 1.5-3x high
+         beyond the ring, the "ten times" of 10c at the far end for
+         the brightest stars.  The new canonical (`canonical-wing-
+         07275-{i,r,z}.fits`, the old kept as `-v1`): the old
+         inside 50 px (the stack median, which the cloud confirms
+         to 3 percent at 46-65 px), the pooled cloud minus the ring
+         from 65 px to the last annulus measured at 3 sigma (1127
+         px in i, 1346 in r, 660 in z), the fitted law beyond by
+         continuity.  Ratios new/old in i: 1.12 at 100 px, 1.16 at
+         160, 0.95 at 300, 0.82 at 460, 0.69 at 660, 0.66 at 943,
+         0.47 at 1500.  The per-visit fit now removes the ring at
+         the band's level before fitting (`fit_wing_model(...,
+         disk_amp)`), for k_in; its aureole is not used beyond the
+         junction.
+       - The junction was broken.  The visit wing is k_in times the
+         visit's stack inside 40 px and the canonical beyond 44,
+         and k_in, fitted with the far cloud (the scan at its 2x
+         bound on most visits), scatters 27 percent across the 64 i
+         visits against the canonical at 40 px (ratios 0.34-2.0;
+         k_in/k_stamp 0.8-1.6).  The core amplitudes are measured
+         against that wing inside 12 px, so a visit's outer wings
+         were off by its factor for every core-measured star; the
+         cross-visit test of 9e hid it by dividing out "the visit
+         scale".  `visit_wing` now scales the stack onto the
+         canonical over 30-40 px (the median ratio, returned and
+         printed): scales 0.52-3.3, the 2025-09-02 stray-light
+         visits the extremes.  The 64 wing files were regenerated
+         (`wing-{visit}-i.fits`, the old as `-v1`); the pass
+         products of the tract run predate all of this.
+       The rerun of pass 1 and 2 on the 64 visits with all three
+       (2026-09-17, 06:38 to 12:50): 9891 detectors, every job
+       completed, none preempted, 1.5 GB of products.  Slurm gives
+       the preemptable QOS about 60 concurrent slots and the jobs
+       take 64 s on average, with as many jobs in the scheduler's
+       prolog and completing states as running, so the pace was ten
+       visits an hour: pack ~8 detectors per job for the r and z
+       runs (`visit_pass_jobs.py`; the resubmission keys on missing
+       outputs, not jobs).  On detector 103 of visit 354 the G 5.74
+       star, at A = -0.1 in every earlier run, fits A = 1.117 +-
+       0.037 with its ring at D = 1.60; the G 11-14 free stars move
+       5-10 percent with the wing at 100-160 px; the core-measured
+       stars are unchanged on this visit (junction scale 1.005).
+       The coadd test on patch 54, the G 6.97 star (the tract's
+       others: patch 21 G 6.41, 67 G 6.95, 20 G 7.60, 88 G 7.82),
+       `~/oh/starsub-visits/coadd-test/54/`: the correction coadd
+       (484 cells, 82 inputs, 78 with a product, weight fraction
+       corrected 1.00 median, 0.88 minimum; correction +0.45 nJy
+       median, 16-84 -0.8 to +1.3, the cores of the masked stars
+       its extremes), the visit-route clean and the coadd-level
+       joint route on the same patch (`compare-routes-54.png`).
+       The star sits 430 px from the patch's bottom edge, so half
+       its ring is on the patch.  In annuli around it with the star
+       masks out (coadd sigma units; 330-510, 510-827 and 827-1100
+       px): the delivered coadd +0.29 to -0.16 inside, -0.02 to
+       -0.10 on the ring, -0.18 to -0.25 beyond, i.e. the ring's
+       +0.15 sigma step is there; the joint route +0.07 to +0.14
+       everywhere (flat, a pedestal); the visit route +0.06, -0.02
+       to +0.05, +0.02 to +0.05: both remove the ring, the visit
+       route nearer zero (`ring-54.png`).  The per-star stacks (10^-3
+       coadd sigma, d - r_mask 5 to 305 px) are again the same
+       within noise: G 6-13 (4 stars) joint -10 +19 -16 +25 -26 +18
+       -44 -3 -12, visit +14 +12 +3 -4 -15 +14 -41 -8 -1; G 13-15
+       (10) joint +67 -5 -49 -1 -14 -33 -57 -23 -15, visit +69 -7
+       -56 +6 -14 -22 -30 -12 +18; G 15-17 (37) joint +1 +15 +18 -6
+       -12 -34 +17 -14 -11, visit +17 +32 +7 -1 -6 -13 +3 -5 -12.
+       At the cell scale (150 px medians, stars masked, robust
+       rms; the plain rms is set by one extended source of 3 x 3
+       cells at +3 nJy in every state): delivered 0.99 nJy over
+       cells and 0.95 between neighbors, joint 0.43 and 0.64, visit
+       0.39 and 0.60 (`cells-54.png`), the same ordering as patch
+       55.  The star's per-visit fits from the gathers: A median
+       0.92 (16-84 0.75-1.04) over 28 visits, D median 1.04
+       (0.93-1.20), so the ring level and the disk prior hold on a
+       G 7 star.  The coadd-level joint fit gives it A = 0.76.
+       Verdict: with the ring in both routes, the visit route is
+       as good as the coadd-level one on the brightest star of the
+       tract's covered patches and slightly flatter at the cell
+       scale; the regime where they separate, if anywhere, is
+       fainter than this test can see (the shear test of 10f found
+       nothing at 0.08 sigma on patch 55).  Figures per patch from
+       `scripts/coadd_figures.py`: `coadd-patch-{p}.png` (delivered,
+       clean, clean with the star masks at zero; the saturated cores
+       shown at zero, since the coadd holds the pipeline's
+       interpolation there and the model subtracts a full core, a
+       pit of -9 uJy on the G 9.8 star), `coadd-correction-{p}.png`
+       (the box medians), `coadd-brightest-{p}.png`.
+    h. The saturated stars' amplitudes (2026-09-18).  The clean
+       coadd of patch 54 keeps half the core of a G 15.05 star
+       outside its saturated center: saturated in 22 of its 25
+       visits (the SAT and INTRP flags reach 7 px), the star was
+       left to the fit, which has no wing signal at G 15 and
+       returned the prior, 0.97 +- 0.30; in the three visits where
+       it is unsaturated (fwhm 1.4-1.6") the core gives 0.94, 1.05
+       and 2.39.  Inside 7 px the coadd is interpolation, so the
+       residual at 4-9 px is partly that; outside, the amplitude.
+       Fix: `core_amplitudes(..., min_frac)` measures over the good
+       pixels of the aperture when they hold at least min_frac of
+       the model's aperture flux (the model summed over the same
+       pixels), and `core_pinned` measures the saturated stars that
+       way over CORE_SAT_RAP = 11 px with CORE_SAT_MIN_FRAC = 0.05.
+       On visit 354 detector 53: 22 of 39 saturated stars measured
+       (G 14.4-15.9; brighter ones lose too much of the aperture and
+       stay with the fit), the G 15.05 star at 0.866 +- 0.001.  On
+       68 unsaturated stars of the same detector the 7-11 px annulus
+       and the 5 px core agree to 2 percent (ratio 0.979, 16-84
+       0.94-1.00; 0.99 for G < 16.5), so the annulus is unbiased and
+       the saturated stars' lower median (0.78 against 0.87) is the
+       magnitude trend of the color term.  The "zero" errors of 9h's
+       lookup were the core measurement's own, 0.0001-0.003: a G 15
+       star has 3.6e6 nJy, the sky noise over the aperture 400.
+       Also seen: visit 2025092100105 has every core amplitude at
+       2.4 (a cloudy visit under the preliminary calibration), so
+       the fit's prior center of 1 is wrong for its free stars by
+       2.4x; the prior should center on the visit's median core
+       amplitude.  To do, with the rerun.
+
+   What it says for the plan: a single visit does not constrain the
+   wing amplitudes of stars fainter than G ~13 (the coadd does);
+   the visit product either carries the prediction for them, or their
+   core flux with the visit's own inner profile (b), or gathers their
+   visits together.  Centroiding is not what limits small radii (a
+   centroid error delta biases an amplitude by n^2 delta^2 / 4 r^2,
+   below a percent to the core for delta < 0.2 px, and Gaia plus the
+   visit wcs give 0.05); the profile shape at the visit's seeing is,
+   which the stack supplies.
+
 ## Smaller items
 
+- The full-image output of `lsst-starsub-visit` (without
+  `--profiles-only`) writes `gaia_stars` from the census alone (no
+  A_err, free, D), so the gather cannot read it; only the product
+  file carries the joint fields.  Write the same table in both
+  (noticed 2026-09-17).
 - Profiles: reference each state locally or exclude neighbors to their
   wide radius (done in `lsst-starsub-remeasure` and the visit tool);
   the global ambient reference alone leaves the wing carpet of the

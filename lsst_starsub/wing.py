@@ -220,6 +220,108 @@ def render_canonical_stars(
     return image
 
 
+def core_amplitudes(image, good, x, y, G, wing, rap, amp_range=None,
+                    sky_sigma=None, min_frac=1.0):
+    """
+    Measure each star's wing amplitude from its core.
+
+    The flux in the pixels within rap px of the star over the model's
+    flux in the same pixels at amplitude 1 (the Gaia prediction).  A
+    star is not measured (amplitude 1, error nan, ok False) where the
+    aperture leaves the image, where the good pixels of the aperture
+    hold less than min_frac of the model's aperture flux (with the
+    default every pixel must be good), or where the ratio falls
+    outside amp_range.  With min_frac below 1 a star whose center is
+    saturated is measured over the unsaturated part of its aperture,
+    the model summed over the same pixels.
+
+    Parameters
+    ----------
+    image: array
+        The image, the sky subtracted
+    good: bool array
+        The usable pixels
+    x, y, G: arrays
+        The stars' positions and Gaia G
+    wing: WingModel, (r, T) or 2-d array
+        The core model, in nJy per unit Gaia flux: a radial wing
+        with its core (the visit's own, lsst_starsub.visit.trough
+        .visit_wing), evaluated at each pixel's radius from the
+        star's exact position; or a stamp of the typical star cut on
+        the integer pixel nearest its center (lsst_starsub.visit
+        .exposure.detector_core_stack), summed over the same
+        integer-grid aperture as the star, so the pixel phases
+        average out over the stars
+    rap: float
+        The aperture radius in px
+    amp_range: (lo, hi), optional
+        Ratios outside this are rejected; default any
+    sky_sigma: float, optional
+        The per-pixel sky noise, for the errors (the sky noise over
+        the aperture over the model flux; the star's own noise is
+        not included)
+    min_frac: float, optional
+        The least fraction of the model's aperture flux the good
+        pixels must hold; default 1, every pixel good
+
+    Returns
+    -------
+    amps: array
+        The amplitudes, 1 where not measured
+    errs: array
+        The 1 sigma errors, nan where not measured or without
+        sky_sigma
+    ok: bool array
+        Measured
+    """
+    ny, nx = image.shape
+    m = int(np.ceil(rap)) + 1
+    n = len(x)
+    amps = np.ones(n)
+    errs = np.full(n, np.nan)
+    ok = np.zeros(n, dtype=bool)
+    template = None
+    if isinstance(wing, np.ndarray) and wing.ndim == 2:
+        template = wing
+        th = template.shape[0] // 2
+        if th < m:
+            raise ValueError('the core template is smaller than the '
+                             'aperture')
+        gy, gx = np.mgrid[-m:m + 1, -m:m + 1]
+        ap_t = np.hypot(gy, gx) <= rap
+        tcut = np.nan_to_num(template[th - m:th + m + 1, th - m:th + m + 1])
+    for k, (xk, yk, gk) in enumerate(zip(x, y, G)):
+        ix, iy = int(round(xk)), int(round(yk))
+        if ix - m < 0 or iy - m < 0 or ix + m >= nx or iy + m >= ny:
+            continue
+        sl = np.s_[iy - m:iy + m + 1, ix - m:ix + m + 1]
+        yy, xx = np.mgrid[iy - m:iy + m + 1, ix - m:ix + m + 1]
+        if template is not None:
+            ap = ap_t
+            unit = tcut
+        else:
+            rr = np.hypot(xx - xk, yy - yk)
+            ap = rr <= rap
+            r, T = profile_of(wing, float(gk))
+            unit = np.interp(rr, r, T)
+        use = ap & good[sl]
+        if not use.any():
+            continue
+        flux = 10.0 ** (-0.4 * gk)
+        model_full = flux * unit[ap].sum()
+        model = flux * unit[use].sum()
+        if not model_full > 0 or model < min_frac * model_full:
+            continue
+        a = float(image[sl][use].sum() / model)
+        if amp_range is not None and not (amp_range[0] <= a <= amp_range[1]):
+            continue
+        amps[k] = a
+        ok[k] = True
+        if sky_sigma is not None:
+            errs[k] = np.sqrt(use.sum()) * sky_sigma / model
+    return amps, errs, ok
+
+
 def write_canonical_wing(fname, r, T, band, nvisit):
     """
     Write a canonical wing file.

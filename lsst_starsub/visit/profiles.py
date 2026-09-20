@@ -256,7 +256,7 @@ LOCAL_REF = (500.0, 600.0)   # d - r_mask range of the local reference
 def measure_profiles(
     states, vexp, stars, seg, gmax=17.0, mode='r',
     ambient=None, wide=True, local_ref=LOCAL_REF,
-    edges=None, gmin=None, good=None,
+    edges=None, gmin=None, good=None, on_image_only=True,
 ):
     """
     Measure the per-star profiles on every image state.
@@ -287,6 +287,10 @@ def measure_profiles(
     good: bool array, optional
         Overrides vexp.good as the usable-pixel mask (e.g. with a
         detection mask applied, the star's own features included)
+    on_image_only: bool, optional
+        Measure only the stars on the image; False also measures
+        the intruders whose window reaches in (the annuli then hold
+        the part of the wing on the image)
     ambient: dict, optional
         name -> level subtracted from each state before the
         measurement (ambient_levels)
@@ -333,7 +337,7 @@ def measure_profiles(
     rows = []
 
     for si, st in enumerate(stars):
-        if not st['on_image'] or float(st['G']) >= gmax:
+        if (on_image_only and not st['on_image']) or float(st['G']) >= gmax:
             continue
         if gmin is not None and float(st['G']) < gmin:
             continue
@@ -428,3 +432,67 @@ def stack_profiles(
         med[wc] = np.nanmedian(profs[:, wc], axis=0)
 
     return med, count
+
+
+# the binned maps of the image states kept with the profiles: the
+# median per BOX_MAP px box with the sources masked, the sky at the
+# nJy level across a detector in a few thousand numbers
+BOX_MAP = 32
+
+
+def box_medians(image, usable, box=None, min_frac=0.5):
+    """
+    Bin an image to the median per box, masked pixels left out.
+
+    Parameters
+    ----------
+    image: array (ny, nx)
+    usable: bool array (ny, nx)
+        Pixels that count
+    box: int, optional
+        The box side in px; default BOX_MAP.  Partial boxes at the far
+        edges are dropped
+    min_frac: float, optional
+        Boxes with fewer usable pixels than this fraction are NaN
+
+    Returns
+    -------
+    med: array (ny // box, nx // box)
+    """
+    box = BOX_MAP if box is None else int(box)
+    ny, nx = image.shape
+    my, mx = ny // box, nx // box
+    im = np.where(usable, image, np.nan)[:my * box, :mx * box]
+    im = im.reshape(my, box, mx, box).transpose(0, 2, 1, 3)
+    im = im.reshape(my, mx, box * box)
+    ok = np.isfinite(im).sum(axis=2) >= min_frac * box * box
+    med = np.nanmedian(np.where(ok[:, :, None], im, np.nan), axis=2)
+    med[~ok] = np.nan
+    return med
+
+
+def state_maps(states, usable, box=None):
+    """
+    The box-median maps of several image states, for the profiles file.
+
+    Parameters
+    ----------
+    states: dict
+        name -> image (nJy)
+    usable: bool array
+        Pixels that count (the good pixels less the star mask)
+    box: int, optional
+        default BOX_MAP
+
+    Returns
+    -------
+    maps: dict
+        'box_' + name -> (map, header) as write_profiles_file takes;
+        the header carries BOX and STATE
+    """
+    box = BOX_MAP if box is None else int(box)
+    return {
+        f'box_{name}': (box_medians(image, usable, box),
+                        {'BOX': box, 'STATE': name})
+        for name, image in states.items()
+    }

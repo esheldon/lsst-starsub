@@ -3,6 +3,7 @@ the joint fit's sky mesh: the neighbor-difference operator and the
 smoothness prior filling a node that has no data
 """
 import numpy as np
+import pytest
 
 import lsst_starsub.joint as jmod
 from lsst_starsub.wing import render_canonical_stars
@@ -104,3 +105,148 @@ def test_joint_fit_returns_diffuse(monkeypatch):
     jf = jmod.joint_fit(img, good, stars, canonical, 1.0, spacing=128,
                         verbose=False)
     assert not jf['diffuse'].any()
+
+
+def test_joint_fit_seg_good_sees_excluded_galaxy():
+    """
+    a big galaxy kept out of the fit (good) but visible to the
+    segmentation (seg_good) is still measured as a large source;
+    without seg_good the excluded region hides it
+    """
+    rng = np.random.RandomState(3)
+    n = 900
+    yy, xx = np.mgrid[:n, :n]
+    img = rng.normal(size=(n, n))
+    img += 100 * np.exp(-np.hypot(xx - 450, yy - 450) / 25.0)
+    r = np.arange(60.0)
+    canonical = (r, 3e7 * np.exp(-r / 4.0))
+    stars = np.zeros(1, dtype=[('x', 'f8'), ('y', 'f8'), ('G', 'f4')])
+    stars['x'], stars['y'], stars['G'] = 800.0, 100.0, 16.0
+    img += render_canonical_stars(img.shape, stars, canonical, gsub=99.0,
+                                  verbose=False)
+    seg_good = np.ones(img.shape, dtype=bool)
+    good = np.hypot(yy - 450, xx - 450) > 250
+
+    jf = jmod.joint_fit(img, good, stars, canonical, 1.0, spacing=128,
+                        verbose=False, seg_good=seg_good)
+    big = jf['big_sources']
+    assert big is not None and big.size >= 1
+    k = np.argmin(np.hypot(big['x'] - 450, big['y'] - 450))
+    assert np.hypot(big['x'][k] - 450, big['y'][k] - 450) < 5
+    assert big['npix'][k] > 3000
+
+    jf = jmod.joint_fit(img, good, stars, canonical, 1.0, spacing=128,
+                        verbose=False)
+    big = jf['big_sources']
+    near = np.hypot(big['x'] - 450, big['y'] - 450) < 5 if big is not None \
+        else np.zeros(0, dtype=bool)
+    assert not near.any()
+
+
+def _edge_setup():
+    """a star just off the right edge with its inner wing on the image"""
+    n, spacing = 512, 128
+    rng = np.random.RandomState(7)
+    r = np.arange(200.0)
+    canonical = (r, 5e6 * (1.0 + r / 3.0) ** -2.5)
+    stars = np.zeros(2, dtype=[('x', 'f8'), ('y', 'f8'), ('G', 'f4')])
+    stars['x'] = [200.0, n + 20.0]
+    stars['y'] = [250.0, 300.0]
+    stars['G'] = [15.0, 11.0]
+    truth = np.array([1.0, 1.4])
+    image = (0.5 + rng.normal(size=(n, n))
+             + render_canonical_stars((n, n), stars, canonical, gsub=99.0,
+                                      amps=truth, verbose=False))
+    good = np.ones((n, n), dtype=bool)
+    # the stars' cores are masked
+    yy, xx = np.mgrid[0:n, 0:n]
+    for st in stars:
+        good &= np.hypot(yy - st['y'], xx - st['x']) > 12
+    return image, good, stars, canonical, spacing, truth
+
+
+def test_edge_star_free_margin():
+    image, good, stars, canonical, spacing, truth = _edge_setup()
+    # default: the off-image star is pinned to the prediction
+    jf = jmod.joint_fit(image, good, stars, canonical, 1.0,
+                        spacing=spacing, verbose=False)
+    assert jf['free'].tolist() == [True, False]
+    assert jf['A'][1] == 1.0 and not np.isfinite(jf['A_err'][1])
+    assert np.isfinite(jf['A_err'][0]) and jf['A_err'][0] > 0
+    # within the margin the edge star is fit and recovers its amplitude
+    jf = jmod.joint_fit(image, good, stars, canonical, 1.0,
+                        spacing=spacing, free_margin=50.0, verbose=False)
+    assert jf['free'].tolist() == [True, True]
+    assert abs(jf['A'][1] - truth[1]) < 5 * jf['A_err'][1]
+    assert abs(jf['A'][1] - truth[1]) < 0.1
+
+
+def test_fixed_amplitudes():
+    image, good, stars, canonical, spacing, truth = _edge_setup()
+    # pass 2: every star pinned to a given amplitude, the sky alone fit
+    jf = jmod.joint_fit(image, good, stars, canonical, 1.0,
+                        spacing=spacing, gfit=-np.inf, amps=truth,
+                        verbose=False)
+    assert not jf['free'].any()
+    assert np.array_equal(jf['A'], truth)
+    resid = image - jf['sky'] - jf['star_model']
+    # the wing of the edge star is gone: the band 20-60 px inside the
+    # edge along its row is flat to the noise
+    band = resid[280:320, 452:492]
+    assert abs(band.mean()) < 0.1
+    # with amps the free star's prior is centered there; the faint
+    # star is weakly constrained and lands within its error
+    jf2 = jmod.joint_fit(image, good, stars, canonical, 1.0,
+                         spacing=spacing, amps=truth, verbose=False)
+    assert jf2['free'].tolist() == [True, False]
+    assert abs(jf2['A'][0] - truth[0]) < 3 * jf2['A_err'][0]
+    assert jf2['A'][1] == truth[1]
+
+
+def test_free_override():
+    image, good, stars, canonical, spacing, truth = _edge_setup()
+    # the on-image star pinned at its amplitude, the edge star free
+    jf = jmod.joint_fit(image, good, stars, canonical, 1.0,
+                        spacing=spacing, amps=truth,
+                        free=np.array([False, True]), verbose=False)
+    assert jf['free'].tolist() == [False, True]
+    assert jf['A'][0] == truth[0] and not np.isfinite(jf['A_err'][0])
+    assert abs(jf['A'][1] - truth[1]) < 0.1
+
+
+def test_ghost_disk_recovered():
+    # a bright star with its wing and a ghost disk of a known
+    # amplitude on a sky plane; the star's inner region masked as the
+    # census would: the fit recovers the wing amplitude and the disk
+    n, spacing = 2048, 256
+    rng = np.random.RandomState(5)
+    yy, xx = np.mgrid[0:n, 0:n]
+    sky = 0.5 + 0.4 * xx / n - 0.2 * yy / n
+    r = np.arange(0.0, 3000.0, 0.5)
+    canonical = (r, 4e8 * (1.0 + r / 3.0) ** -2.5)
+    stars = np.zeros(1, dtype=[('x', 'f8'), ('y', 'f8'), ('G', 'f4')])
+    stars['x'], stars['y'], stars['G'] = 1000.0, 1050.0, 6.5
+    d_true = 1.4
+    image = (sky + rng.normal(size=(n, n))
+             + 0.9 * render_canonical_stars((n, n), stars, canonical,
+                                            gsub=99.0, verbose=False)
+             + jmod.render_disks((n, n), stars, np.array([d_true]), 'i'))
+    good = np.hypot(xx - 1000.0, yy - 1050.0) > 300.0
+    with pytest.raises(ValueError):
+        jmod.joint_fit(image, good, stars, canonical, 1.0,
+                       spacing=spacing, gfit=99.0, verbose=False)
+    jf = jmod.joint_fit(image, good, stars, canonical, 1.0,
+                        spacing=spacing, gfit=99.0, band='i', verbose=False)
+    assert jf['disk_free'][0] and jf['free'][0]
+    assert abs(jf['A'][0] - 0.9) < 0.05
+    assert abs(jf['D'][0] - d_true) < 0.05
+    assert jf['D_err'][0] < 0.05
+    # the disk pinned: a sky-only fit at the given amplitudes
+    jf2 = jmod.joint_fit(image, good, stars, canonical, 1.0,
+                         spacing=spacing, gfit=-np.inf,
+                         amps=np.array([0.9]), disks=np.array([d_true]),
+                         fit_disks=False, band='i', verbose=False)
+    assert not jf2['disk_free'][0] and jf2['D'][0] == d_true
+    assert np.isnan(jf2['D_err'][0])
+    resid = image - jf2['sky'] - jf2['star_model']
+    assert abs(np.median(resid[good])) < 0.05

@@ -141,7 +141,8 @@ def deep_segmentation(
     sig,
     grow=SEG_GROW,
     return_diffuse=False,
-    detect_settings=None
+    detect_settings=None,
+    return_big=False,
 ):
     """
     Segment the sources with the metadetection detection settings.
@@ -171,6 +172,11 @@ def deep_segmentation(
     detect_settings: dict, optional
         The detection settings, thresh, kernel_fwhm, pixel_scale and
         minarea; default DETECT_SETTINGS
+    return_big: bool, optional
+        Also return the sep table of the large sources, the ones of
+        at least SEG_BIG_NPIX px that are not diffuse: their
+        centroids and moment ellipses (x, y, a, b, theta) and areas
+        (npix), for the large-galaxy mask (lsst_starsub.galaxies)
 
     Returns
     -------
@@ -179,6 +185,8 @@ def deep_segmentation(
     region: bool array
         With return_diffuse only: the diffuse segments left to the
         sky fit (none when SEG_DIFFUSE_MEDIAN is None)
+    big: structured array
+        With return_big only: the large sources
     """
     from scipy import ndimage
 
@@ -211,10 +219,13 @@ def deep_segmentation(
 
     grow_big_sources(det, objs)
 
+    out = (det,)
     if return_diffuse:
-        return det, region
+        out += (region,)
+    if return_big:
+        out += (objs[objs['npix'] >= SEG_BIG_NPIX],)
 
-    return det
+    return out if len(out) > 1 else det
 
 
 def _extract(imf, sig, mask, detect_settings=None):
@@ -566,6 +577,163 @@ def render_mesh(nodes, values, shape, block=RENDER_BLOCK):
     return out
 
 
+# the ghost disk of the bright stars: an out-of-focus pupil image
+# centered on the star: the pupil's image, a flat ring with the central
+# obscuration dark inside it.  The outer edge from 45 stars G < 7.5 of
+# six i-band visits (scripts/bright_star_stack.py, 2026-09-16): the
+# half level at 827 px, the same in every quadrant and for G < 6.5 and
+# 6.5-7.5, the transition 812 -> 862 px.  The inner edge and the level
+# from the per-star wing profiles pooled over 65 i visits
+# (scripts/pooled_wings.py and canonical_empirical.py): the wing is
+# one power law r^-2.85 from
+# 80 px out through and beyond the ring, and the ring on top of it
+# starts at 510 px (0.62 of the outer radius, the obscuration) at
+# 1.35e3 nJy per unit Gaia flux; a filled disk fits worse.  The level
+# spreads 48 percent across stars (the i-band flux against G), so each
+# star's ring gets its own amplitude, with a prior of DISK_PRIOR_SIGMA
+# about the prediction.  The radii are set by the optics, not the band;
+# the level per unit flux is per band (the same pooled fit on the 21 r
+# and 24 z visits; the r profiles also carries a fainter, wider excess
+# to 1600 px that the empirical canonical wing holds)
+DISK_RADIUS = 827.0
+DISK_INNER = 510.0
+DISK_EDGE = 25.0        # px: both edges fall linearly over +- this
+DISK_GMAX = 8.0         # stars brighter than this get a disk column
+# nJy per unit Gaia flux, the prediction (D = 1), per band
+DISK_LEVELS = {'r': 1.2e3, 'i': 1.35e3, 'z': 3.2e2}
+DISK_PRIOR_SIGMA = 0.5
+
+
+def disk_level(band):
+    """
+    The ghost ring's level per unit Gaia flux in a band.
+
+    Parameters
+    ----------
+    band: str
+
+    Returns
+    -------
+    level: float
+        nJy per unit Gaia flux (DISK_LEVELS)
+    """
+    band = str(band)
+    if band not in DISK_LEVELS:
+        raise ValueError(
+            f'no ghost ring level for band {band!r}: measure it on the '
+            f'pooled per-star wing profiles (scripts/canonical_empirical.py) '
+            f'and add it to DISK_LEVELS'
+        )
+    return DISK_LEVELS[band]
+
+
+def disk_profile(r, radius=DISK_RADIUS, inner=DISK_INNER, edge=DISK_EDGE):
+    """
+    The unit ghost profile: 1 in the ring, linear edges, 0 elsewhere.
+
+    Parameters
+    ----------
+    r: array
+        Radii in px
+
+    Returns
+    -------
+    values: array
+    """
+    r = np.asarray(r, dtype='f8')
+    outer = np.clip((radius + edge - r) / (2 * edge), 0.0, 1.0)
+    inner_edge = np.clip((r - inner + edge) / (2 * edge), 0.0, 1.0)
+    return outer * inner_edge
+
+
+def disk_prediction(G, band):
+    """The disk's predicted level in nJy for a star of Gaia G in a band."""
+    return disk_level(band) * 10.0 ** (-0.4 * np.asarray(G, dtype='f8'))
+
+
+def disk_column(cy, cx, x, y, G, band, b=BIN):
+    """
+    Evaluate one star's disk at the cell centers of its window.
+
+    The values are for D = 1, the prediction (disk_prediction).
+
+    Parameters
+    ----------
+    cy, cx: arrays (my, mx)
+        The cell centers (binned_cells)
+    x, y: float
+        The star's position, pixels
+    G: float
+        Its Gaia G magnitude
+    band: str
+        The band, for the level
+    b: int, optional
+        The cell side in px; default BIN
+
+    Returns
+    -------
+    idx: int array
+        The cells with a nonzero value, flat indices into cy, cx
+    vals: array
+        The disk at those cells, nJy
+    """
+    rmax = DISK_RADIUS + DISK_EDGE
+    my, mx = cy.shape
+    i0 = max(0, int((y - rmax) // b) - 1)
+    i1 = min(my, int((y + rmax) // b) + 2)
+    j0 = max(0, int((x - rmax) // b) - 1)
+    j1 = min(mx, int((x + rmax) // b) + 2)
+    if i1 <= i0 or j1 <= j0:
+        return np.zeros(0, dtype=int), np.zeros(0)
+    rr = np.hypot(cy[i0:i1, j0:j1] - y, cx[i0:i1, j0:j1] - x)
+    vals = float(disk_prediction(G, band)) * disk_profile(rr)
+    w = vals > 0
+    ii, jj = np.nonzero(w)
+    return (ii + i0) * mx + (jj + j0), vals[w]
+
+
+def render_disks(shape, stars, D, band):
+    """
+    Render the stars' ghost disks, in nJy.
+
+    Parameters
+    ----------
+    shape: (ny, nx)
+    stars: structured array
+        The census, with x, y and G
+    D: array
+        Per star, the disk amplitude (1 the prediction); 0 for no disk
+    band: str
+        The band, for the level
+
+    Returns
+    -------
+    image: array (ny, nx) f4
+    """
+    ny, nx = shape
+    image = np.zeros((ny, nx), dtype='f4')
+    rmax = DISK_RADIUS + DISK_EDGE
+    for xk, yk, gk, dk in zip(stars['x'], stars['y'], stars['G'], D):
+        if not dk > 0:
+            continue
+        m = int(np.ceil(rmax)) + 1
+        ix, iy = int(round(float(xk))), int(round(float(yk)))
+        x0, x1 = max(0, ix - m), min(nx, ix + m + 1)
+        y0, y1 = max(0, iy - m), min(ny, iy + m + 1)
+        if x1 <= x0 or y1 <= y0:
+            continue
+        level = float(dk) * float(disk_prediction(gk, band))
+        dx = np.arange(x0, x1, dtype='f8') - float(xk)
+        dy = np.arange(y0, y1, dtype='f8') - float(yk)
+        for r0 in range(0, dy.size, RENDER_BLOCK):
+            r1 = min(dy.size, r0 + RENDER_BLOCK)
+            rr = np.hypot(dy[r0:r1, None], dx[None, :])
+            image[y0 + r0:y0 + r1, x0:x1] += (
+                level * disk_profile(rr)
+            ).astype('f4')
+    return image
+
+
 def star_column(cy, cx, x, y, G, canonical, b=BIN, eps=EPS):
     """
     Evaluate one star's wing at the cell centers of its window.
@@ -646,10 +814,17 @@ def joint_fit(
     variance=None,
     prior_sigma=PRIOR_SIGMA,
     detect_settings=None,
+    free_margin=None,
+    amps=None,
+    free=None,
+    disks=None,
+    fit_disks=True,
+    band=None,
     verbose=True,
+    seg_good=None,
 ):
     """
-    Fit the star amplitudes and the sky mesh together.
+    Fit the star amplitudes, the ghost disks and the sky mesh together.
 
     Weighted least squares on the good pixels binned b x b (see the
     module docstring), in npass passes: the first without a source
@@ -695,18 +870,57 @@ def joint_fit(
     detect_settings: dict, optional
         The detection settings of the source segmentation
         (deep_segmentation); default DETECT_SETTINGS
+    free_margin: float or array, optional
+        Stars brighter than gfit whose center is within this many px
+        outside the image are fit as well, one value or one per
+        census star (e.g. a multiple of the mask radius, so the
+        stars across a detector edge with inner wing on the image
+        get their own amplitude); default 0, on-image stars only
+    amps: array, optional
+        Per census star, the amplitude the pinned stars take and the
+        center of the free stars' prior; default 1, the prediction.
+        With gfit below every star this is a sky-only fit at fixed
+        amplitudes
+    free: bool array, optional
+        Per census star, fit its amplitude; replaces the gfit and
+        free_margin selection (a star without cells is still pinned)
+    disks: array, optional
+        Per census star, the ghost disk amplitude (1 the prediction,
+        disk_prediction) the pinned disks take and the center of the
+        free disks' prior; default 1.  Stars fainter than DISK_GMAX
+        have no disk whatever the value
+    fit_disks: bool, optional
+        Fit the disk amplitudes of the stars brighter than DISK_GMAX
+        whose disk reaches the image and has cells (default); False
+        pins every disk to disks
+    band: str, optional
+        The band, for the disks' level (disk_level); required when a
+        star brighter than DISK_GMAX reaches the image
     verbose: bool, optional
         Print the per-pass summaries
+    seg_good: bool array, optional
+        The pixels the source segmentation may use; default good.
+        The caller can keep regions out of the fit (good) that the
+        segmentation should still see, e.g. the catalog galaxies
+        (coadd.starsub.handle_stars_joint galaxies): their light
+        stays out of the sky fit, while their sources are still
+        found and measured (big_sources, for the large-galaxy mask)
 
     Returns
     -------
     result: dict
-        A (per census star; 1 where pinned), free (bool per star),
-        sky (full res), star_model (full res), nodes, node_values,
+        A (per census star; the amps value where pinned), A_err (1
+        sigma of the free amplitudes, priors included; nan where
+        pinned), free (bool per star), D (per star, the disk
+        amplitude, 0 where the star has no disk), D_err (nan where
+        not fit), disk_free (bool per star), sky (full res), star_model
+        (full res: the wings plus the disks), nodes, node_values,
         node_err (their 1 sigma, priors included), ncell, chi2 (per
         cell), diffuse (full res bool: the large diffuse segments the
         last segmentation left to the sky fit; none with
-        SEG_DIFFUSE_MEDIAN None or a single pass)
+        SEG_DIFFUSE_MEDIAN None or a single pass), big_sources (the
+        sep table of the last segmentation's large sources, see
+        deep_segmentation return_big; None with a single pass)
     """
     from scipy import sparse
     from .wing import render_canonical_stars
@@ -718,12 +932,36 @@ def joint_fit(
     if variance is not None:
         good &= np.isfinite(variance) & (variance > 0)
 
+    if seg_good is None:
+        seg_good = good
+    else:
+        seg_good = seg_good & np.isfinite(image)
+        if variance is not None:
+            seg_good &= np.isfinite(variance) & (variance > 0)
+
     x, y, G = stars['x'], stars['y'], stars['G'].astype('f8')
 
-    on = (x >= 0) & (x < nx) & (y >= 0) & (y < ny)
+    # the free stars: bright enough, and on the image or within the
+    # margin of it
+    m = np.zeros(stars.size) if free_margin is None else \
+        np.broadcast_to(np.asarray(free_margin, dtype='f8'), (stars.size,))
+    near = (x >= -m) & (x < nx + m) & (y >= -m) & (y < ny + m)
 
-    free = on & (G < gfit)
+    if free is None:
+        free = near & (G < gfit)
+    else:
+        free = np.array(free, dtype=bool)
+        if free.shape != (stars.size,):
+            raise ValueError('free must have one value per census star')
     nfree = int(free.sum())
+
+    # the pinned amplitudes and the prior centers
+    if amps is None:
+        prior_center = np.ones(stars.size)
+    else:
+        prior_center = np.array(amps, dtype='f8')
+        if prior_center.shape != (stars.size,):
+            raise ValueError('amps must have one value per census star')
 
     # free stars need cells to be fit on: those whose window holds
     # no good cell (inside masks or no-data regions) are pinned as
@@ -748,17 +986,46 @@ def joint_fit(
             free[si] = False
     nfree = int(free.sum())
 
-    # the pinned stars' prediction, subtracted from the data
+    # the ghost disks: every star brighter than DISK_GMAX whose disk
+    # reaches the image; free where asked and there are cells
+    rdisk = DISK_RADIUS + DISK_EDGE
+    has_disk = ((G < DISK_GMAX) & (x >= -rdisk) & (x < nx + rdisk)
+                & (y >= -rdisk) & (y < ny + rdisk))
+    if disks is None:
+        disk_center = np.ones(stars.size)
+    else:
+        disk_center = np.array(disks, dtype='f8')
+        if disk_center.shape != (stars.size,):
+            raise ValueError('disks must have one value per census star')
+    D = np.where(has_disk, disk_center, 0.0)
+    if has_disk.any() and band is None:
+        raise ValueError('joint_fit needs the band for the ghost disks')
+    disk_free = has_disk & bool(fit_disks)
+    disk_idx, disk_vals = {}, {}
+    for si in np.flatnonzero(disk_free):
+        idx, v = disk_column(cy, cx, float(x[si]), float(y[si]),
+                             float(G[si]), band, b=b)
+        if idx.size == 0 or not has_cells.ravel()[idx].any():
+            disk_free[si] = False
+        else:
+            disk_idx[si], disk_vals[si] = idx, v
+    ndisk = int(disk_free.sum())
+    nstar = nfree + ndisk
+
+    # the pinned stars' model (wings and disks), subtracted from the data
     pinned = stars[~free]
+    work = image.astype('f4')
     if pinned.size:
-        work = render_canonical_stars(
+        work = work - render_canonical_stars(
             image.shape,
             pinned,
             canonical,
+            amps=prior_center[~free],
         )
-        np.subtract(image, work, out=work)
-    else:
-        work = image.astype('f4')
+    pinned_disk = has_disk & ~disk_free
+    if pinned_disk.any():
+        work -= render_disks(image.shape, stars[pinned_disk],
+                             D[pinned_disk], band)
 
     # the columns of the free stars at the cell centers
     ncell = cy.size
@@ -778,10 +1045,20 @@ def joint_fit(
         cols.append(np.full(idx.size, k))
         vals.append(v)
 
-    P = sparse.csc_matrix(
-        (np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))),
-        shape=(ncell, nfree),
-    )
+    for k, si in enumerate(np.flatnonzero(disk_free)):
+        rows.append(disk_idx[si])
+        cols.append(np.full(disk_idx[si].size, nfree + k))
+        vals.append(disk_vals[si])
+
+    if nstar > 0:
+        P = sparse.csc_matrix(
+            (np.concatenate(vals),
+             (np.concatenate(rows), np.concatenate(cols))),
+            shape=(ncell, nstar),
+        )
+    else:
+        # a sky-only fit (every star and disk pinned)
+        P = sparse.csc_matrix((ncell, 0))
 
     H, nodes = mesh_columns(cy, cx, image.shape, spacing)
     X = sparse.hstack([P, H]).tocsr()
@@ -792,14 +1069,15 @@ def joint_fit(
     # units of F, chi2 x sky_sigma^2: 1 / delta^2 per pair
     smooth = None
     if MESH_SMOOTH_DELTA is not None:
-        D = mesh_difference_matrix(nodes)
-        smooth = (D.T @ D).toarray() / MESH_SMOOTH_DELTA**2
+        Dm = mesh_difference_matrix(nodes)
+        smooth = (Dm.T @ Dm).toarray() / MESH_SMOOTH_DELTA**2
 
     # first flattening for the segmentation: the mesh alone on
     # the good pixels
     seg_excl = np.zeros(image.shape, dtype=bool)
     diffuse = np.zeros(image.shape, dtype=bool)
-    A = np.ones(stars.size)
+    big_sources = None
+    A = prior_center.copy()
 
     for ipass in range(npass):
         ok = good & ~seg_excl
@@ -816,18 +1094,21 @@ def joint_fit(
         rhs = X.T @ (w * mean.ravel())
 
         # a tiny ridge on the mesh keeps unsupported nodes finite
-        F[nfree:, nfree:] += (
-            np.eye(F.shape[0] - nfree) * 1e-6 * w.sum() / ncell
+        F[nstar:, nstar:] += (
+            np.eye(F.shape[0] - nstar) * 1e-6 * w.sum() / ncell
         )
 
         if smooth is not None:
-            F[nfree:, nfree:] += smooth
+            F[nstar:, nstar:] += smooth
 
         # and on the amplitudes, at a level far below any star's
         # own information (a star losing its cells to the pass-2
         # segmentation would otherwise make F singular)
 
-        F[:nfree, :nfree] += np.eye(nfree) * 1e-9 * np.diag(F)[:nfree].max()
+        if nstar > 0:
+            F[:nstar, :nstar] += (
+                np.eye(nstar) * 1e-9 * np.diag(F)[:nstar].max()
+            )
 
         if prior_sigma is not None:
             # the prior in the data term's units: F = X^T W X with
@@ -836,11 +1117,16 @@ def joint_fit(
             # 1/prior_sigma^2 enters times sky_sigma^2
             pw = sky_sigma**2 / prior_sigma**2
             F[:nfree, :nfree] += np.eye(nfree) * pw
-            rhs[:nfree] += pw
+            rhs[:nfree] += pw * prior_center[free]
+        if ndisk > 0:
+            pwd = sky_sigma**2 / DISK_PRIOR_SIGMA**2
+            F[nfree:nstar, nfree:nstar] += np.eye(ndisk) * pwd
+            rhs[nfree:nstar] += pwd * disk_center[disk_free]
 
         sol = np.linalg.solve(F, rhs)
         A[free] = sol[:nfree]
-        node_values = sol[nfree:]
+        D[disk_free] = sol[nfree:nstar]
+        node_values = sol[nstar:]
         model_cells = X @ sol
         resid_cells = (mean.ravel() - model_cells) * (w > 0)
 
@@ -853,6 +1139,7 @@ def joint_fit(
         if verbose:
             print(
                 f'    joint fit pass {ipass + 1}: {nfree} amplitudes, '
+                f'{ndisk} disks, '
                 f'{node_values.size} nodes ({spacing} px), '
                 f'{int((w > 0).sum())} cells, chi2/cell {chi2:.3f}; '
                 f'A of the brightest: '
@@ -873,15 +1160,19 @@ def joint_fit(
             amps=A,
             verbose=False,
         )
+        if has_disk.any():
+            resid += render_disks(image.shape, stars[has_disk],
+                                  D[has_disk], band)
 
         np.subtract(image, resid, out=resid)
 
-        seg_excl, diffuse = deep_segmentation(
+        seg_excl, diffuse, big_sources = deep_segmentation(
             resid,
-            good,
+            seg_good,
             sky_sigma,
             return_diffuse=True,
             detect_settings=detect_settings,
+            return_big=True,
         )
 
         del resid
@@ -899,8 +1190,14 @@ def joint_fit(
     # (white noise: the coadd's correlated noise makes them lower
     # bounds)
 
-    cov = np.diag(np.linalg.inv(F))[nfree:]
-    node_err = sky_sigma * np.sqrt(np.maximum(cov, 0.0))
+    cov = np.diag(np.linalg.inv(F))
+    node_err = sky_sigma * np.sqrt(np.maximum(cov[nstar:], 0.0))
+    A_err = np.full(stars.size, np.nan)
+    A_err[free] = sky_sigma * np.sqrt(np.maximum(cov[:nfree], 0.0))
+    D_err = np.full(stars.size, np.nan)
+    D_err[disk_free] = sky_sigma * np.sqrt(
+        np.maximum(cov[nfree:nstar], 0.0)
+    )
     sky_full = render_mesh(nodes, node_values, image.shape)
 
     model_full = render_canonical_stars(
@@ -910,10 +1207,17 @@ def joint_fit(
         amps=A,
         verbose=False,
     )
+    if has_disk.any():
+        model_full += render_disks(image.shape, stars[has_disk],
+                                   D[has_disk], band)
 
     return dict(
         A=A,
+        A_err=A_err,
         free=free,
+        D=D,
+        D_err=D_err,
+        disk_free=disk_free,
         sky=sky_full,
         star_model=model_full,
         nodes=nodes,
@@ -922,4 +1226,5 @@ def joint_fit(
         ncell=ncell,
         chi2=chi2,
         diffuse=diffuse,
+        big_sources=big_sources,
     )

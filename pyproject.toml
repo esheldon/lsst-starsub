@@ -18,6 +18,10 @@ lsst-starsub-make-slurm-template = "lsst_starsub.cli.make_slurm_template:main"
 lsst-starsub-cell-clean = "lsst_starsub.cli.cell_clean:main"
 lsst-starsub-sim = "lsst_starsub.cli.sim:main"
 lsst-starsub-make-gaia = "lsst_starsub.cli.make_gaia:main"
+lsst-starsub-visit-gather = "lsst_starsub.cli.visit_gather:main"
+lsst-starsub-visit-wing = "lsst_starsub.cli.visit_wing:main"
+lsst-starsub-visit-detectors = "lsst_starsub.cli.visit_detectors:main"
+lsst-starsub-correction-coadd = "lsst_starsub.cli.correction_coadd:main"
 
 [tool.setuptools.packages.find]
 include = ["lsst_starsub*"]

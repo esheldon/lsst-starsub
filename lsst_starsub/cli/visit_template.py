@@ -8,6 +8,8 @@ per-visit Gaia extract is made in --gaia-dir on first use
 (gaia-dr3-visit-{visit}.fits, from the refcat shards)
 """
 import os
+
+from ..visit.exposure import visit_detectors as exposure_visit_detectors
 import sys
 import time
 
@@ -57,32 +59,14 @@ def get_args():
         help='pool the saved extracts in {outdir}/extracts-{visit}/ '
              'instead of extracting (no butler access)',
     )
+    parser.add_argument(
+        '--from-template',
+        help='refit this pooled template file (its stored per-star wing '
+             'profiles, stack profile and stack) with the current wing '
+             'fit and write '
+             'the result to {outdir}; no extracts or butler access',
+    )
     return parser.parse_args()
-
-
-def visit_detectors(butler, visit):
-    """
-    List the detectors of a visit with a wcs and a calibration.
-
-    Parameters
-    ----------
-    butler: lsst.daf.butler.Butler
-    visit: int
-
-    Returns
-    -------
-    detectors: list of int
-        Sorted
-    """
-    from ..site import INSTRUMENT
-
-    cat = butler.get(
-        'visit_summary', dataId=dict(instrument=INSTRUMENT, visit=visit),
-    )
-    return sorted(
-        int(rec['id']) for rec in cat
-        if rec.getWcs() is not None and rec.getPhotoCalib() is not None
-    )
 
 
 def extract_one(butler, visit, detector, gaia_path):
@@ -207,6 +191,12 @@ def main():
     visit = args.visit
     edir = os.path.join(args.outdir, f'extracts-{visit}')
 
+    if args.from_template:
+        from ..visit.template import read_template_file, refit_template
+        pooled = refit_template(read_template_file(args.from_template))
+        write_pooled(args, pooled)
+        return
+
     if args.from_extracts:
         import glob
         files = sorted(glob.glob(os.path.join(edir, 'extract-*.fits')))
@@ -218,7 +208,7 @@ def main():
     butler = make_visit_butler(args.repo, args.collection)
 
     gaia_path = ensure_visit_gaia_file(butler, visit, args.gaia_dir)
-    dets = args.detectors or visit_detectors(butler, visit)
+    dets = args.detectors or exposure_visit_detectors(butler, visit)
     if args.ndet is not None and args.ndet < len(dets):
         idx = np.unique(np.round(
             np.linspace(0, len(dets) - 1, args.ndet)
@@ -266,9 +256,24 @@ def pool_and_write(args, extracts):
     extracts: list of dict
         From extract_detector
     """
-    from ..visit.template import plot_template, pool_visit, write_template_file
+    from ..visit.template import pool_visit
 
-    pooled = pool_visit(extracts)
+    write_pooled(args, pool_visit(extracts))
+
+
+def write_pooled(args, pooled):
+    """
+    Write a pooled template's file and png to the output directory.
+
+    Parameters
+    ----------
+    args: argparse.Namespace
+        From get_args
+    pooled: dict
+        From pool_visit or refit_template
+    """
+    from ..visit.template import plot_template, write_template_file
+
     band = pooled['params']['band']
     stem = os.path.join(args.outdir, f'template-{args.visit}-{band}')
     write_template_file(stem + '.fits', pooled)
