@@ -112,6 +112,14 @@ WIDE_GROW = 24          # circle margin for the fainter stars
 # core amplitudes outside this range (a neighbor in the aperture, a
 # star off its Gaia position) are left to the fit
 CORE_AMP_RANGE = (0.25, 4.0)
+# the saturated stars: measured over the unsaturated part of a larger
+# aperture (the saturated and interpolated pixels out), which must
+# hold at least CORE_SAT_MIN_FRAC of the model's aperture flux.  The
+# aperture stays inside the core stack (CORE_STACK_HALF); a G 15 star
+# saturated to 7 px keeps a tenth of the aperture flux in the 7-11 px
+# annulus, at a signal to noise of ~25
+CORE_SAT_RAP = 11.0
+CORE_SAT_MIN_FRAC = 0.05
 # the detector's own core profile for the core amplitudes: the mean of
 # the unsaturated stars' stamps in this G range, each per unit Gaia
 # flux, out to CORE_STACK_HALF px, scaled to the wing's flux within
@@ -1003,7 +1011,12 @@ def detector_core_stack(vexp, stars, wing, gmin=None, gmax=None, half=None,
 
 def core_pinned(vexp, stars, wing, rap, edge_factor=None, neighbors=None):
     """
-    Measure the unsaturated on-image stars' amplitudes from their cores.
+    Measure the on-image stars' amplitudes from their cores.
+
+    The saturated stars are measured over the unsaturated part of a
+    CORE_SAT_RAP px aperture (CORE_SAT_MIN_FRAC): left to the fit they
+    keep its prior, and a saturated star's color then stays in the
+    clean coadd (2026-09-18).
 
     On the flattened image (the wide-box sky pass done), each such
     star's flux within rap px over the wing's at amplitude 1, with the
@@ -1072,10 +1085,10 @@ def core_pinned(vexp, stars, wing, rap, edge_factor=None, neighbors=None):
         core = wing
     else:
         print(f'    core stack from {nstack} stars')
+    usable = core_pixels(vexp)
     if sel.any():
         a, e, k = core_amplitudes(
-            vexp.image.array, core_pixels(vexp), stars['x'][sel],
-            stars['y'][sel],
+            vexp.image.array, usable, stars['x'][sel], stars['y'][sel],
             stars['G'][sel].astype('f8'), core, rap,
             amp_range=CORE_AMP_RANGE, sky_sigma=vexp.sky_sigma,
         )
@@ -1083,6 +1096,21 @@ def core_pinned(vexp, stars, wing, rap, edge_factor=None, neighbors=None):
     print(f'    core amplitudes ({rap:g} px): {int(ok.sum())} of '
           f'{int(sel.sum())} unsaturated stars measured, median '
           f'{np.median(amps[ok]) if ok.any() else np.nan:.3f}')
+    # the saturated stars, over what is left of a larger aperture
+    ssel = (stars['on_image'] == 1) & (stars['is_sat'] == 1)
+    if crowded is not None:
+        ssel &= ~blended
+    if ssel.any():
+        a, e, k = core_amplitudes(
+            vexp.image.array, usable, stars['x'][ssel], stars['y'][ssel],
+            stars['G'][ssel].astype('f8'), core, CORE_SAT_RAP,
+            amp_range=CORE_AMP_RANGE, sky_sigma=vexp.sky_sigma,
+            min_frac=CORE_SAT_MIN_FRAC,
+        )
+        amps[ssel], errs[ssel], ok[ssel] = a, e, k
+        print(f'    saturated stars ({CORE_SAT_RAP:g} px, the saturated '
+              f'pixels out): {int(k.sum())} of {int(ssel.sum())} measured, '
+              f'median {np.median(a[k]) if k.any() else np.nan:.3f}')
     return amps, errs, ok
 
 

@@ -419,3 +419,32 @@ def test_product_band_from_meta_table():
     p.meta = np.zeros(1, dtype=[('band', 'S2')])
     p.meta['band'] = b'r '
     assert product_band(p) == 'r'
+
+
+def test_core_amplitudes_saturated_center():
+    """a star with its center unusable is measured over the rest of
+    the aperture when the fraction left is allowed"""
+    from lsst_starsub.wing import WingModel, core_amplitudes
+
+    rng = np.random.default_rng(11)
+    n = 96
+    r = np.arange(0.0, 3000.0, 0.5)
+    T = 2.0e8 * (1.0 + r / 2.0) ** -3.0
+    wing = WingModel(r, T)
+    G, amp = 15.0, 1.6
+    yy, xx = np.mgrid[0:n, 0:n]
+    rr = np.hypot(yy - 48.3, xx - 47.6)
+    image = amp * 10 ** (-0.4 * G) * np.interp(rr, r, T)
+    image += rng.normal(size=(n, n))
+    good = rr > 4.0
+    args = (np.array([47.6]), np.array([48.3]), np.array([G]), wing, 11.0)
+    amps, errs, ok = core_amplitudes(image, good, *args, sky_sigma=1.0)
+    assert not ok[0] and amps[0] == 1.0
+    amps, errs, ok = core_amplitudes(image, good, *args, sky_sigma=1.0,
+                                     min_frac=0.05)
+    assert ok[0]
+    assert abs(amps[0] - amp) < 3 * errs[0] and abs(amps[0] - amp) < 0.05
+    # too little of the aperture left: not measured
+    amps, errs, ok = core_amplitudes(image, rr > 10.0, *args, sky_sigma=1.0,
+                                     min_frac=0.05)
+    assert not ok[0]

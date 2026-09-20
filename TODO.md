@@ -1811,7 +1811,42 @@ coadds.
        tract's covered patches and slightly flatter at the cell
        scale; the regime where they separate, if anywhere, is
        fainter than this test can see (the shear test of 10f found
-       nothing at 0.08 sigma on patch 55).
+       nothing at 0.08 sigma on patch 55).  Figures per patch from
+       `scripts/coadd_figures.py`: `coadd-patch-{p}.png` (delivered,
+       clean, clean with the star masks at zero; the saturated cores
+       shown at zero, since the coadd holds the pipeline's
+       interpolation there and the model subtracts a full core, a
+       pit of -9 uJy on the G 9.8 star), `coadd-correction-{p}.png`
+       (the box medians), `coadd-brightest-{p}.png`.
+    h. The saturated stars' amplitudes (2026-09-18).  The clean
+       coadd of patch 54 keeps half the core of a G 15.05 star
+       outside its saturated center: saturated in 22 of its 25
+       visits (the SAT and INTRP flags reach 7 px), the star was
+       left to the fit, which has no wing signal at G 15 and
+       returned the prior, 0.97 +- 0.30; in the three visits where
+       it is unsaturated (fwhm 1.4-1.6") the core gives 0.94, 1.05
+       and 2.39.  Inside 7 px the coadd is interpolation, so the
+       residual at 4-9 px is partly that; outside, the amplitude.
+       Fix: `core_amplitudes(..., min_frac)` measures over the good
+       pixels of the aperture when they hold at least min_frac of
+       the model's aperture flux (the model summed over the same
+       pixels), and `core_pinned` measures the saturated stars that
+       way over CORE_SAT_RAP = 11 px with CORE_SAT_MIN_FRAC = 0.05.
+       On visit 354 detector 53: 22 of 39 saturated stars measured
+       (G 14.4-15.9; brighter ones lose too much of the aperture and
+       stay with the fit), the G 15.05 star at 0.866 +- 0.001.  On
+       68 unsaturated stars of the same detector the 7-11 px annulus
+       and the 5 px core agree to 2 percent (ratio 0.979, 16-84
+       0.94-1.00; 0.99 for G < 16.5), so the annulus is unbiased and
+       the saturated stars' lower median (0.78 against 0.87) is the
+       magnitude trend of the color term.  The "zero" errors of 9h's
+       lookup were the core measurement's own, 0.0001-0.003: a G 15
+       star has 3.6e6 nJy, the sky noise over the aperture 400.
+       Also seen: visit 2025092100105 has every core amplitude at
+       2.4 (a cloudy visit under the preliminary calibration), so
+       the fit's prior center of 1 is wrong for its free stars by
+       2.4x; the prior should center on the visit's median core
+       amplitude.  To do, with the rerun.
 
    What it says for the plan: a single visit does not constrain the
    wing amplitudes of stars fainter than G ~13 (the coadd does);
