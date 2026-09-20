@@ -70,6 +70,36 @@ def test_circle_radius_and_disk_mask():
     assert n == 0 and mask is mask0
 
 
+def test_bright_intruder_margin():
+    """
+    the coadd route's intruder rule: a naked-eye star off the image
+    by less than its output mask radius is in the census, a fainter
+    star that far off is not (STAR_MARGIN)
+    """
+    from lsst_starsub.census import (
+        STAR_MARGIN, disk_mask_radius, select_stars,
+    )
+
+    n = 400
+    mask0 = np.zeros((n, n), dtype='i4')
+    gaia = np.zeros(2, dtype=[
+        ('ra', 'f8'), ('dec', 'f8'), ('phot_g_mean_mag', 'f8'), ('ruwe', 'f8'),
+    ])
+    gaia['ruwe'] = 1.0
+    gaia['phot_g_mean_mag'] = [4.0, 12.0]
+    x = np.array([n + 600.0, n + 600.0])
+    y = np.array([200.0, 200.0])
+    assert 600.0 > STAR_MARGIN
+
+    margin = lambda g: max(STAR_MARGIN, disk_mask_radius(g))  # noqa: E731
+    stars = select_stars(gaia, x, y, mask0, gsub=19.0, verbose=False,
+                         intruder_margin=margin)
+    assert stars.size == 1 and stars['G'][0] == 4.0
+    assert stars['on_image'][0] == 0
+    stars = select_stars(gaia, x, y, mask0, gsub=19.0, verbose=False)
+    assert stars.size == 0
+
+
 def test_select_stars_intruders():
     from lsst_starsub.census import (
         GSAT, STAR_MARGIN, circle_radius, select_stars,

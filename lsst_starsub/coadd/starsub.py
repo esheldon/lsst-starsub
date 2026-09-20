@@ -362,8 +362,8 @@ def handle_stars_joint(
         (wing_gmax, wing_rin, wing_rout, wing_core_rap)
     """
     from ..census import (
-        DISK_MASK_GMAX, DISK_MASK_RADIUS, GSUB, add_disk_masks,
-        make_star_table, patch_census,
+        DISK_MASK_GMAX, DISK_MASK_RADIUS, GSUB, STAR_MARGIN, add_disk_masks,
+        disk_mask_radius, make_star_table, patch_census,
     )
     from ..joint import GFIT, PRIOR_SIGMA, SPACING, joint_fit
     from ..maskbits import DM_NO_DATA
@@ -375,10 +375,19 @@ def handle_stars_joint(
     if prior is None:
         prior = PRIOR_SIGMA
 
+    # the off-patch intruders: the usual STAR_MARGIN, but a star
+    # brighter than DISK_MASK_GMAX counts from as far as its output
+    # mask radius, so its wing, ghost disk and output mask are all
+    # handled on the patches its halo reaches (zeta Cap, G 3.5, off
+    # 05889-00093 with its halo on it: unmodeled, the patch never
+    # finished, 2026-09-19)
+    def intruder_margin(gmag):
+        return max(STAR_MARGIN, disk_mask_radius(gmag))
+
     mask0 = deep_coadd.mask.array[:, :, 0]
     stars, starmask, _, dstar, x, y = patch_census(
         gaia, wcs, deep_coadd.bbox, mask0, gsub=gsub, coadd=True,
-        verbose=verbose,
+        verbose=verbose, intruder_margin=intruder_margin,
     )
 
     apply = getattr(deep_coadd, 'apply_background', None)
@@ -414,12 +423,15 @@ def handle_stars_joint(
 
     sky_sigma = float(np.sqrt(np.median(var[good])))
 
+    # the bright intruders get their amplitude fit on the wing they
+    # put on the image rather than the pinned prediction
     jf = joint_fit(
         image, good, stars, wing, sky_sigma,
         spacing=spacing, prior_sigma=prior, variance=var,
         detect_settings=detect_settings, verbose=verbose,
         band=getattr(deep_coadd, 'band', None),
         seg_good=seg_good,
+        free_margin=disk_mask_radius(stars['G'].astype('f8')),
     )
 
     image -= jf['sky']
