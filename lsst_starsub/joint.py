@@ -141,7 +141,8 @@ def deep_segmentation(
     sig,
     grow=SEG_GROW,
     return_diffuse=False,
-    detect_settings=None
+    detect_settings=None,
+    return_big=False,
 ):
     """
     Segment the sources with the metadetection detection settings.
@@ -171,6 +172,11 @@ def deep_segmentation(
     detect_settings: dict, optional
         The detection settings, thresh, kernel_fwhm, pixel_scale and
         minarea; default DETECT_SETTINGS
+    return_big: bool, optional
+        Also return the sep table of the large sources, the ones of
+        at least SEG_BIG_NPIX px that are not diffuse: their
+        centroids and moment ellipses (x, y, a, b, theta) and areas
+        (npix), for the large-galaxy mask (lsst_starsub.galaxies)
 
     Returns
     -------
@@ -179,6 +185,8 @@ def deep_segmentation(
     region: bool array
         With return_diffuse only: the diffuse segments left to the
         sky fit (none when SEG_DIFFUSE_MEDIAN is None)
+    big: structured array
+        With return_big only: the large sources
     """
     from scipy import ndimage
 
@@ -211,10 +219,13 @@ def deep_segmentation(
 
     grow_big_sources(det, objs)
 
+    out = (det,)
     if return_diffuse:
-        return det, region
+        out += (region,)
+    if return_big:
+        out += (objs[objs['npix'] >= SEG_BIG_NPIX],)
 
-    return det
+    return out if len(out) > 1 else det
 
 
 def _extract(imf, sig, mask, detect_settings=None):
@@ -810,6 +821,7 @@ def joint_fit(
     fit_disks=True,
     band=None,
     verbose=True,
+    seg_good=None,
 ):
     """
     Fit the star amplitudes, the ghost disks and the sky mesh together.
@@ -886,6 +898,13 @@ def joint_fit(
         star brighter than DISK_GMAX reaches the image
     verbose: bool, optional
         Print the per-pass summaries
+    seg_good: bool array, optional
+        The pixels the source segmentation may use; default good.
+        The caller can keep regions out of the fit (good) that the
+        segmentation should still see, e.g. the catalog galaxies
+        (coadd.starsub.handle_stars_joint galaxies): their light
+        stays out of the sky fit, while their sources are still
+        found and measured (big_sources, for the large-galaxy mask)
 
     Returns
     -------
@@ -899,7 +918,9 @@ def joint_fit(
         node_err (their 1 sigma, priors included), ncell, chi2 (per
         cell), diffuse (full res bool: the large diffuse segments the
         last segmentation left to the sky fit; none with
-        SEG_DIFFUSE_MEDIAN None or a single pass)
+        SEG_DIFFUSE_MEDIAN None or a single pass), big_sources (the
+        sep table of the last segmentation's large sources, see
+        deep_segmentation return_big; None with a single pass)
     """
     from scipy import sparse
     from .wing import render_canonical_stars
@@ -910,6 +931,13 @@ def joint_fit(
 
     if variance is not None:
         good &= np.isfinite(variance) & (variance > 0)
+
+    if seg_good is None:
+        seg_good = good
+    else:
+        seg_good = seg_good & np.isfinite(image)
+        if variance is not None:
+            seg_good &= np.isfinite(variance) & (variance > 0)
 
     x, y, G = stars['x'], stars['y'], stars['G'].astype('f8')
 
@@ -1048,6 +1076,7 @@ def joint_fit(
     # the good pixels
     seg_excl = np.zeros(image.shape, dtype=bool)
     diffuse = np.zeros(image.shape, dtype=bool)
+    big_sources = None
     A = prior_center.copy()
 
     for ipass in range(npass):
@@ -1137,12 +1166,13 @@ def joint_fit(
 
         np.subtract(image, resid, out=resid)
 
-        seg_excl, diffuse = deep_segmentation(
+        seg_excl, diffuse, big_sources = deep_segmentation(
             resid,
-            good,
+            seg_good,
             sky_sigma,
             return_diffuse=True,
             detect_settings=detect_settings,
+            return_big=True,
         )
 
         del resid
@@ -1196,4 +1226,5 @@ def joint_fit(
         ncell=ncell,
         chi2=chi2,
         diffuse=diffuse,
+        big_sources=big_sources,
     )

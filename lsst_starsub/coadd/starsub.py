@@ -297,7 +297,7 @@ def handle_stars_correction(deep_coadd, wcs, gaia, correction_file,
 def handle_stars_joint(
     deep_coadd, wcs, gaia, wing, gsub=None,
     spacing=None, prior=None, detect_settings=None,
-    verbose=True,
+    verbose=True, galaxies=None,
 ):
     """
     Subtract the stars and the sky of a patch coadd with the joint fit.
@@ -335,6 +335,13 @@ def handle_stars_joint(
         lsst_starsub.joint.DETECT_SETTINGS
     verbose: bool, optional
         Print the census and fit summaries
+    galaxies: (gals, x, y), optional
+        The catalog galaxies of the patch (lsst_starsub.galaxies
+        read_galaxy_file) with their pixel positions; their D25
+        ellipses scaled by galaxies.GAL_SKY_SCALE are kept out of
+        the sky fit like the star masks (catalog_exclusion), so the
+        mesh does not fit the outer light of a galaxy larger than
+        the fit's own capped exclusion as sky.  Default none
 
     Returns
     -------
@@ -348,11 +355,16 @@ def handle_stars_joint(
         gsub, chi2, ncell, sky_sigma, shape, bg_restored and the
         wing, for make_fit_tables; diffuse, the bool mask of the
         large diffuse segments left to the sky fit (joint_fit), for
-        the caller to mask; nwing, the number of fainter stars
+        the caller to mask; big_sources, the sep table of the last
+        segmentation's large sources, for the large-galaxy mask
+        (lsst_starsub.galaxies); nwing, the number of fainter stars
         whose wings were subtracted, and the settings of that step
         (wing_gmax, wing_rin, wing_rout, wing_core_rap)
     """
-    from ..census import GSUB, make_star_table, patch_census
+    from ..census import (
+        DISK_MASK_GMAX, DISK_MASK_RADIUS, GSUB, STAR_MARGIN, add_disk_masks,
+        disk_mask_radius, make_star_table, patch_census,
+    )
     from ..joint import GFIT, PRIOR_SIGMA, SPACING, joint_fit
     from ..maskbits import DM_NO_DATA
 
@@ -363,10 +375,19 @@ def handle_stars_joint(
     if prior is None:
         prior = PRIOR_SIGMA
 
+    # the off-patch intruders: the usual STAR_MARGIN, but a star
+    # brighter than DISK_MASK_GMAX counts from as far as its output
+    # mask radius, so its wing, ghost disk and output mask are all
+    # handled on the patches its halo reaches (zeta Cap, G 3.5, off
+    # 05889-00093 with its halo on it: unmodeled, the patch never
+    # finished, 2026-09-19)
+    def intruder_margin(gmag):
+        return max(STAR_MARGIN, disk_mask_radius(gmag))
+
     mask0 = deep_coadd.mask.array[:, :, 0]
     stars, starmask, _, dstar, x, y = patch_census(
         gaia, wcs, deep_coadd.bbox, mask0, gsub=gsub, coadd=True,
-        verbose=verbose,
+        verbose=verbose, intruder_margin=intruder_margin,
     )
 
     apply = getattr(deep_coadd, 'apply_background', None)
@@ -386,13 +407,31 @@ def handle_stars_joint(
     good = (np.isfinite(var) & (var > 0) & ((mask0 & DM_NO_DATA) == 0)
             & ~starmask)
 
+    # the segmentation still sees the catalog galaxies, so their
+    # sources are measured for the mask; only the fit does not
+    seg_good = good
+    if galaxies is not None:
+        from ..galaxies import catalog_exclusion
+        gals, gx, gy = galaxies
+        excl = catalog_exclusion(gals, gx, gy, image.shape)
+        if excl is not None:
+            good = good & ~excl
+            if verbose:
+                print(f'    {gals.size} catalog galaxies: '
+                      f'{excl.mean() * 100:.2f} percent of the image '
+                      f'kept out of the sky fit')
+
     sky_sigma = float(np.sqrt(np.median(var[good])))
 
+    # the bright intruders get their amplitude fit on the wing they
+    # put on the image rather than the pinned prediction
     jf = joint_fit(
         image, good, stars, wing, sky_sigma,
         spacing=spacing, prior_sigma=prior, variance=var,
         detect_settings=detect_settings, verbose=verbose,
         band=getattr(deep_coadd, 'band', None),
+        seg_good=seg_good,
+        free_margin=disk_mask_radius(stars['G'].astype('f8')),
     )
 
     image -= jf['sky']
@@ -401,6 +440,17 @@ def handle_stars_joint(
                                  verbose=verbose)
     star_table = make_star_table(stars, [])
     star_table['A'] = jf['A']
+
+    # the output mask of the brightest stars covers their ghost disk,
+    # which the fit modeled but whose edges it leaves rings at
+    starmask, ngrown = add_disk_masks(starmask, stars)
+    if ngrown > 0:
+        from scipy import ndimage
+        dstar = ndimage.distance_transform_edt(~starmask)
+        if verbose:
+            print(f'    {ngrown} stars brighter than G {DISK_MASK_GMAX:g}: '
+                  f'output mask grown to their ghost disk '
+                  f'({DISK_MASK_RADIUS:.0f} px)')
 
     if verbose:
         nfree = int(jf['free'].sum())
@@ -426,6 +476,7 @@ def handle_stars_joint(
         bg_restored=bg_restored,
         wing=wing,
         diffuse=jf['diffuse'],
+        big_sources=jf['big_sources'],
         nwing=nwing,
         wing_gmax=WING_GMAX,
         wing_rin=WING_RIN,

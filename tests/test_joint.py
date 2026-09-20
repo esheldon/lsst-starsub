@@ -107,6 +107,42 @@ def test_joint_fit_returns_diffuse(monkeypatch):
     assert not jf['diffuse'].any()
 
 
+def test_joint_fit_seg_good_sees_excluded_galaxy():
+    """
+    a big galaxy kept out of the fit (good) but visible to the
+    segmentation (seg_good) is still measured as a large source;
+    without seg_good the excluded region hides it
+    """
+    rng = np.random.RandomState(3)
+    n = 900
+    yy, xx = np.mgrid[:n, :n]
+    img = rng.normal(size=(n, n))
+    img += 100 * np.exp(-np.hypot(xx - 450, yy - 450) / 25.0)
+    r = np.arange(60.0)
+    canonical = (r, 3e7 * np.exp(-r / 4.0))
+    stars = np.zeros(1, dtype=[('x', 'f8'), ('y', 'f8'), ('G', 'f4')])
+    stars['x'], stars['y'], stars['G'] = 800.0, 100.0, 16.0
+    img += render_canonical_stars(img.shape, stars, canonical, gsub=99.0,
+                                  verbose=False)
+    seg_good = np.ones(img.shape, dtype=bool)
+    good = np.hypot(yy - 450, xx - 450) > 250
+
+    jf = jmod.joint_fit(img, good, stars, canonical, 1.0, spacing=128,
+                        verbose=False, seg_good=seg_good)
+    big = jf['big_sources']
+    assert big is not None and big.size >= 1
+    k = np.argmin(np.hypot(big['x'] - 450, big['y'] - 450))
+    assert np.hypot(big['x'][k] - 450, big['y'][k] - 450) < 5
+    assert big['npix'][k] > 3000
+
+    jf = jmod.joint_fit(img, good, stars, canonical, 1.0, spacing=128,
+                        verbose=False)
+    big = jf['big_sources']
+    near = np.hypot(big['x'] - 450, big['y'] - 450) < 5 if big is not None \
+        else np.zeros(0, dtype=bool)
+    assert not near.any()
+
+
 def _edge_setup():
     """a star just off the right edge with its inner wing on the image"""
     n, spacing = 512, 128

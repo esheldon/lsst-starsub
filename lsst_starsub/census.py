@@ -30,8 +30,24 @@ from .maskbits import DM_INTRP, DM_NO_DATA, DM_SAT
 # 56 saturated stars in 3 patches
 MASK_R15 = 45.0     # circle radius in px at G = 15
 MASK_SLOPE = 0.115  # radius scales as 10^(slope * (15 - G))
+# px: cap on the law.  Its calibrators were G 9-15 and the cap guards
+# the extrapolation; it bites only above G 6.3.  The cap is also what
+# the joint fit can live with: a hole of 900 px (tried 2026-09-19 on
+# the G 4-5 stars of the run-dp2-v01 region) lets the unsupported
+# sky-mesh nodes run away and the field outside came out 3 sigma
+# low, while the 450 px hole with the ghost-disk term fits to +-0.1
+# sigma.  The larger mask those stars need in the OUTPUT is
+# disk_mask_radius, applied after the fit
 MASK_RMAX = 450.0
 MINRAD = 20.0       # circle floor. subtracted cores never show
+# the ghost disk of the brightest stars (lsst_starsub.joint.DISK_RADIUS
+# 827 px with DISK_EDGE 25) is fit but not trusted in the output: the
+# flat template leaves rings at both edges of a G 4 star's disk that
+# make blend groups.  Stars brighter than DISK_MASK_GMAX get an output
+# mask of at least DISK_MASK_RADIUS (add_disk_masks, after the fit);
+# G < 6 is ~300 stars over DP2, 2.5 deg^2
+DISK_MASK_GMAX = 6.0
+DISK_MASK_RADIUS = 900.0
 STAR_MARGIN = 210   # off-patch stars whose wings still intrude
 GSAT = 15.2         # G saturation threshold of these coadds
 GSUB = 19.0         # subtract stars brighter than this
@@ -58,7 +74,9 @@ def circle_radius(gmag):
     Get the mask circle radius of a star from its magnitude.
 
     MASK_R15 at G = 15, scaled as 10^(MASK_SLOPE (15 - G)), floored at
-    MINRAD and capped at MASK_RMAX.
+    MINRAD and capped at MASK_RMAX.  This is the mask the fits see;
+    the output mask of the brightest stars is larger
+    (disk_mask_radius).
 
     Parameters
     ----------
@@ -80,8 +98,75 @@ def circle_radius(gmag):
     )
 
 
+def disk_mask_radius(gmag):
+    """
+    Get the output mask radius of a star: circle_radius, or at least
+    DISK_MASK_RADIUS for the stars brighter than DISK_MASK_GMAX,
+    whose ghost disk is masked whole in the output.
+
+    Parameters
+    ----------
+    gmag: float or array
+        Gaia G magnitude
+
+    Returns
+    -------
+    radius: float or array
+        In pixels, the shape of gmag
+    """
+    gmag = np.asarray(gmag, dtype='f8')
+    rad = np.asarray(circle_radius(gmag), dtype='f8')
+    rad = np.where(
+        gmag < DISK_MASK_GMAX, np.maximum(rad, DISK_MASK_RADIUS), rad,
+    )
+    return rad if rad.ndim else float(rad)
+
+
+def add_disk_masks(starmask, stars):
+    """
+    Grow the star mask to the output radius of the brightest stars.
+
+    A circle of disk_mask_radius around every census star brighter
+    than DISK_MASK_GMAX (on the image or not: an off-image star's
+    disk can reach in) is added to a copy of the mask.  Called after
+    the fits, which use the circle_radius mask.
+
+    Parameters
+    ----------
+    starmask: bool array
+        The mask of the circle_radius circles (build_star_mask)
+    stars: structured array
+        The census (select_stars), with x, y, G
+
+    Returns
+    -------
+    mask, nstar: bool array, int
+        The grown mask (the input when no star qualifies) and the
+        number of stars grown
+    """
+    bright = np.flatnonzero(stars['G'] < DISK_MASK_GMAX)
+    if bright.size == 0:
+        return starmask, 0
+
+    ny, nx = starmask.shape
+    mask = starmask.copy()
+    for k in bright:
+        rad = float(disk_mask_radius(float(stars['G'][k])))
+        x, y = float(stars['x'][k]), float(stars['y'][k])
+        x0 = int(max(0, np.floor(x - rad)))
+        x1 = int(min(nx, np.ceil(x + rad) + 1))
+        y0 = int(max(0, np.floor(y - rad)))
+        y1 = int(min(ny, np.ceil(y + rad) + 1))
+        if x1 <= x0 or y1 <= y0:
+            continue
+        yy, xx = np.mgrid[y0:y1, x0:x1]
+        mask[y0:y1, x0:x1] |= (xx - x) ** 2 + (yy - y) ** 2 <= rad ** 2
+
+    return mask, int(bright.size)
+
+
 def select_stars(gaia, x, y, mask0, gsub=GSUB, verbose=True,
-                 intruder_gmax=None, intruder_margin=None):
+                 intruder_gmax=None, intruder_margin=None, sat_gmax=None):
     """
     Select the census: on-patch stars saturated or brighter than gsub.
 
@@ -90,6 +175,14 @@ def select_stars(gaia, x, y, mask0, gsub=GSUB, verbose=True,
     No RUWE guard: Gaia at these depths is essentially pure point
     sources, and high-RUWE binaries are still stars we want gone.
     Referred to as "the subtract-and-mask census" in various places.
+
+    The saturation test reads the mask, so on a visit a star fainter
+    than GSAT that saturates in good seeing is still in the census.
+    With sat_gmax the test is only applied to stars brighter than
+    that: on a coadd the saturation bits differ between the bands,
+    and a census that depends on them would differ too, while the
+    coadd routes need one census for every band (patch_census passes
+    GSAT + 0.5 for coadds, the census of the v0.2.0 runs).
 
     Parameters
     ----------
@@ -111,6 +204,9 @@ def select_stars(gaia, x, y, mask0, gsub=GSUB, verbose=True,
         Intruders within this many px of the image; a callable is
         given the star's G and returns the margin, so the wings can
         set it (e.g. a multiple of circle_radius).  Default STAR_MARGIN
+    sat_gmax: float, optional
+        Only stars brighter than this are tested for saturation;
+        default None, every on-image star
 
     Returns
     -------
@@ -122,6 +218,8 @@ def select_stars(gaia, x, y, mask0, gsub=GSUB, verbose=True,
         intruder_gmax = GSAT
     if intruder_margin is None:
         intruder_margin = STAR_MARGIN
+    if sat_gmax is None:
+        sat_gmax = np.inf
 
     ny, nx = mask0.shape
     sat = (mask0 & DM_SAT) != 0
@@ -144,8 +242,11 @@ def select_stars(gaia, x, y, mask0, gsub=GSUB, verbose=True,
             # get a tighter test so a neighbor's bleed trail does not
             # flag them
             m = 5 if gmag < GSAT + 0.5 else 2
-            is_sat = sat[max(0, iy - m):iy + m + 1,
-                         max(0, ix - m):ix + m + 1].any()
+            is_sat = (
+                gmag < sat_gmax
+                and sat[max(0, iy - m):iy + m + 1,
+                        max(0, ix - m):ix + m + 1].any()
+            )
             if not (is_sat or gmag < gsub):
                 continue
         else:
@@ -197,7 +298,9 @@ def patch_census(gaia, wcs, bbox, mask0, gsub=GSUB, coadd=False, verbose=True,
     gsub: float, optional
         Census depth
     coadd: bool, optional
-        See build_star_mask
+        See build_star_mask; also limits the saturation test to
+        stars brighter than GSAT + 0.5, so the census is the same in
+        every band (select_stars sat_gmax)
     verbose: bool, optional
         Print the census and masked fraction
     intruder_gmax, intruder_margin: optional
@@ -218,6 +321,7 @@ def patch_census(gaia, wcs, bbox, mask0, gsub=GSUB, coadd=False, verbose=True,
     stars = select_stars(
         gaia, x, y, mask0, gsub=gsub, verbose=verbose,
         intruder_gmax=intruder_gmax, intruder_margin=intruder_margin,
+        sat_gmax=GSAT + 0.5 if coadd else None,
     )
 
     starmask, comps = build_star_mask(

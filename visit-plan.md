@@ -201,3 +201,37 @@ and the residual stacks around the bright stars compared with the
 coadd-level result on the same patch.  The coadd-level route stays the
 one for the shear test; the visit-level version is what to build after
 that test says the concept is worth it.
+
+## Open items the coadd-level galaxy and star masks leave for this route (2026-09-19)
+
+Recorded so they are not lost when the visit route replaces the
+coadd joint fit in production.  Both come from
+`lsst_starsub.galaxies` and the G < 6 output mask
+(`census.add_disk_masks`), which live in the coadd joint route only;
+the visit-level products are untouched by them.
+
+1. **The large-galaxy mask needs a segmentation.**  `lsst-mdet
+   --galaxy-file` sizes each catalog galaxy's mask from the joint
+   fit's last segmentation (`joint_fit` result `big_sources`, kept
+   by `handle_stars_joint`) and refuses `--starsub-method visit`,
+   which applies the correction coadds and runs no fit.  When that
+   route is used for a run, run `joint.deep_segmentation(...,
+   return_big=True)` on the corrected coadd in
+   `handle_stars_correction` and hand the table on in its fit dict,
+   so `galaxy_mask` works unchanged.  Cheap: one segmentation per
+   band.
+
+2. **The catalog galaxies should be kept out of the visit-level sky
+   determination.**  The coadd joint fit excludes each HyperLEDA
+   galaxy's D25 ellipse x `galaxies.GAL_SKY_SCALE` from the sky mesh
+   (`galaxies.catalog_exclusion`); without it a galaxy larger than
+   the fit's own capped source exclusion is fit as sky and leaves a
+   dark halo (IC 5078, 3.5', in 06804-00062; the DM object background
+   has the same halo).  The visit passes have the same exposure to it
+   and can use the same catalog and the same function on the
+   visit-frame positions.
+
+The G < 6 star output mask is coadd-only by design (the fit keeps the
+450 px circle and the ghost-disk term; growing the fit's hole to the
+disk made the sky mesh run away, 2026-09-19) and needs nothing from
+this route.
