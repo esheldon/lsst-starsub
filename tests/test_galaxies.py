@@ -158,6 +158,15 @@ def test_galaxy_mask_floor():
     a, b, theta = gmod.catalog_ellipse(gals[0])
     assert np.isclose(a, 300.0) and np.isclose(b, 75.0)
     assert np.isclose(theta, np.pi / 2)
+    # the patch frame has east along -x: a galaxy at pa 45 (northeast)
+    # runs from lower right to upper left, 135 degrees from +x; the
+    # mirror image (45 degrees) was the bug through v0.3.0
+    g45 = gals.copy()
+    g45['pa'] = 45.0
+    _, _, theta45 = gmod.catalog_ellipse(g45[0])
+    assert np.isclose(theta45, np.deg2rad(135.0))
+    m45 = gmod.catalog_exclusion(g45, x, y, shape, scale=1.0)
+    assert m45[400 + 200, 400 - 200] and not m45[400 + 200, 400 + 200]
 
     mask, table = gmod.galaxy_mask(fits, gals, x, y, shape, scale=1.5)
     assert table.size == 1

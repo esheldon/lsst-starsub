@@ -285,8 +285,11 @@ def catalog_ellipse(gal):
     The semi-major axis is D25/2 in px, the axis ratio 10^-logr25
     (1 when the catalog has none) and the orientation from the
     position angle east of north (0 when none): the patch frame has
-    north along +y and east along +x, so an angle of pa east of
-    north is 90 - pa degrees counter-clockwise from +x, sep's theta.
+    north along +y and east along -x (right ascension decreases
+    with x), so an angle of pa east of north is 90 + pa degrees
+    counter-clockwise from +x, sep's theta.  (Through v0.3.0 this
+    was 90 - pa, the mirror image, wrong for position angles away
+    from 0 and 90.)
 
     Parameters
     ----------
@@ -304,7 +307,7 @@ def catalog_ellipse(gal):
     pa = float(gal['pa'])
     if not np.isfinite(pa):
         pa = 0.0
-    return a, a * q, np.deg2rad(90.0 - pa)
+    return a, a * q, np.deg2rad(90.0 + pa)
 
 
 def catalog_exclusion(gals, x, y, shape, scale=GAL_SKY_SCALE):
