@@ -235,3 +235,56 @@ The G < 6 star output mask is coadd-only by design (the fit keeps the
 450 px circle and the ghost-disk term; growing the fit's hole to the
 disk made the sky mesh run away, 2026-09-19) and needs nothing from
 this route.
+
+## The inner core: per detector now, seeing-dependent later (2026-10-03)
+
+What the raft images of 2026-09-23 showed (visit 2025060400354,
+raft R23, `scripts/raft_images.py`): the unsaturated stars sit in
+black pits in the clean image.  Measured on detector 103 over 51
+isolated unsaturated stars of G 15.5-17.5, the residual against the
+rendered model is +8 percent of the data at 0-2 px, +4 at 2-3, then
+-5 to -10 percent from 4 to 13 px and -2 beyond: the rendered core
+is broader than the stars, with the same flux inside 5 px, since
+that is where the amplitude is fixed.  An 8 x 8 median sits ~3 px
+out, in the over-subtracted ring, so the bin is -24 nJy, a sigma
+below the sky.
+
+The cause.  The amplitude is measured against the detector's own
+core stack, at that detector's seeing (`detector_core_stack`), but
+the rendered model inside the 40 px junction is the visit wing,
+whose inner part is the template stack pooled over the focal plane:
+a seeing mixture, azimuthally averaged, with the interpolation blur
+of the sub-pixel alignment.  On a detector with sharper seeing than
+the visit average the model core is wider than its stars; on a
+worse one, narrower.  Beyond 13 px, under the census masks of these
+stars, the two shapes meet and the wing is right to a percent.
+
+The plan, two steps.
+
+1. **The detector's core in the product.**  Pass 1 already measures
+   each detector's core stack for the amplitudes; keep its radial
+   profile out to the junction (about twenty numbers per detector,
+   with the detector fwhm) in the product, and let the renderers
+   (`visit.product.render_stars`, `star_model_at`) use it inside 12
+   px in place of the visit stack, joined to the wing by continuity
+   as `visit_wing` joins the stack now.  Exact for that detector,
+   free, and it removes the pits.  Done for the core amplitudes
+   already; the rendering is the missing half.
+
+2. **A seeing library for the core.**  With the per-detector
+   profiles of the tract run, 155 detectors x 64 visits of cores with
+   their fwhm, bin them by seeing and build the inner profile per
+   band as a function of fwhm.  A detector then needs only its fwhm,
+   one number, to render its core, and a visit needs no template at
+   all: core from the seeing, far wing from the canonical, zero
+   point from continuity.  That retires the per-visit template
+   pooling, the heaviest step of the chain (~3 core-hours per
+   visit), which becomes a calibration set.  The limit: a PSF core
+   is not a one-parameter family (ellipticity, the atmospheric
+   kernel's wings, the optics vary at fixed fwhm), so a library core
+   leaves residuals at a few percent of the peak where the
+   detector's own stack leaves none; inside the masks.  The same
+   calibration set answers the question first: how much of the
+   core-to-core variation does the fwhm alone explain.  That decides
+   whether the library replaces the templates or only trims the
+   cores on detectors without a stack.

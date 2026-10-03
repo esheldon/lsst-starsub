@@ -1847,6 +1847,18 @@ coadds.
        the fit's prior center of 1 is wrong for its free stars by
        2.4x; the prior should center on the visit's median core
        amplitude.  To do, with the rerun.
+    i. The inner core (2026-09-23, written up 2026-10-03 in
+       `visit-plan.md`, "The inner core"): the raft images
+       (`scripts/raft_images.py`, `tract-07275/2025060400354/
+       raft-R23-images-ring.png`) show the unsaturated stars in
+       black pits.  On detector 103 the rendered core is broader
+       than the stars (+8 percent at 0-2 px, -5 to -10 at 4-13 px,
+       -2 beyond): the amplitude is measured against the detector's
+       core stack but the model renders the visit-pooled stack.
+       Plan: carry the detector's core profile in the product and
+       render with it inside 12 px; then a seeing library of cores
+       from the tract run's profiles, which can retire the per-visit
+       templates.  Inside the masks either way.
 
    What it says for the plan: a single visit does not constrain the
    wing amplitudes of stars fainter than G ~13 (the coadd does);
